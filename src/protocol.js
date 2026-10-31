@@ -138,8 +138,11 @@ export const API_PREFIX = "/__sketchboard/api/";
  * @typedef {{ canvas: string, items: FeedbackItem[], message?: string }} SendRequest
  * @typedef {{ held: number }} SendResponse
  *
- * `src`: the edited element's data-sb-src ordinal, or null if it has none (a
- * script created it). `ver`: the page's data-sb-ver.
+ * `src`: the edited element's data-sb-src ordinal. Null if the element has no
+ * data-sb-src, or if more than one element in the page has the same
+ * data-sb-src (a script copied a static element, so neither the copy nor the
+ * original can be told apart). Clones of <template> content keep their `src`.
+ * `ver`: the page's data-sb-ver.
  * @typedef {{ canvas: string, board: string, selector: string, oldText: string, newText: string, src?: number | null, ver?: string }} EditRequest
  * The browser adds `item` to its Unsent queue. It reaches `wait` on Send.
  * @typedef {{ item: EditItem }} EditResponse
