@@ -280,8 +280,8 @@ test("col tells apart identical start tags on one line", async () => {
   assert.deepEqual(got.map((/** @type {any} */ i) => [i.line, i.col, i.tag]), [
     [2, 20, "<td>"],
     [2, 32, "<td>"],
-    // Columns count UTF-16 code units: the emoji is two.
-    [3, 12, "<b>"],
+    // Columns count code points: the emoji is one.
+    [3, 11, "<b>"],
   ]);
 });
 

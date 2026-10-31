@@ -76,7 +76,7 @@ export const API_PREFIX = "/__sketchboard/api/";
  * the element's own tag and attributes. The server never writes it to a file.
  * `src`, `ver`: from the EditRequest. When `wait` returns the item, the
  * server adds the rest if `ver` is given and `src` is a number, from the file
- * at that time: `line` and `col` (1-based; col in UTF-16 code units) and `tag`
+ * at that time: `line` and `col` (1-based; col in Unicode code points) and `tag`
  * (the start tag as in the file, cut to 200 characters) of element `src`, and
  * `inTemplate` if it is inside a <template>, when the file still has the
  * element ordinals of version `ver` (unchanged, or changed only by applied

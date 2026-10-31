@@ -429,7 +429,7 @@ function locate(item) {
   if (!tag) return item;
   const before = html.slice(0, tag.start);
   const line = (before.match(/\r\n?|\n/g)?.length ?? 0) + 1;
-  const col = tag.start - Math.max(before.lastIndexOf("\n"), before.lastIndexOf("\r"));
+  const col = [...before.slice(Math.max(before.lastIndexOf("\n"), before.lastIndexOf("\r")) + 1)].length + 1;
   return { ...item, line, col, tag: html.slice(tag.start, tag.end).slice(0, 200), ...(tag.inTemplate && { inTemplate: true }) };
 }
 
