@@ -33,8 +33,8 @@ import { boardNameError, canvasNameError, ensureStateDir, indexFile, insideRoot,
 
 const PROTOCOL_FILE = fileURLToPath(new URL("./protocol.js", import.meta.url));
 const UI_DIR = fileURLToPath(new URL("../ui/", import.meta.url));
-/** @param {string} ver contentHash of the served file */
-const overlayTag = (ver) => `<script type="module" src="${TOOL_PREFIX}overlay.js" data-sb-ver="${ver}"></script>`;
+/** @param {string | null} ver contentHash of the served file, if the page has source positions */
+const overlayTag = (ver) => `<script type="module" src="${TOOL_PREFIX}overlay.js"${ver === null ? "" : ` data-sb-ver="${ver}"`}></script>`;
 const MAX_BODY = 10 * 1024 * 1024;
 const DEBOUNCE_MS = 75;
 
@@ -400,12 +400,54 @@ async function locate(canvas, item) {
   if (item?.kind !== "edit" || typeof item.ver !== "string" || typeof item.src !== "number") return item;
   const file = boardNameError(item.board) ? null : await rootFile(root, [canvas, item.board]);
   const bytes = file && readFileSync(file);
-  if (!bytes || contentHash(bytes) !== item.ver) return { ...item, fileChanged: true };
+  if (!bytes || !samePositions(file, bytes, item.ver)) return { ...item, fileChanged: true };
   const html = bytes.toString("utf8");
   const tag = regions(html).tags[item.src];
   if (!tag) return item;
   const line = (html.slice(0, tag.start).match(/\r\n?|\n/g)?.length ?? 0) + 1;
   return { ...item, line, tag: html.slice(tag.start, tag.end).slice(0, 200), ...(tag.inTemplate && { inTemplate: true }) };
+}
+
+/**
+ * Per board file: the hash of its content after the server's last applied
+ * edit, and earlier hashes that differ from it only by applied edits. An
+ * applied edit changes only text between tags, so pages served from those
+ * versions have the same element ordinals as the file.
+ * @type {Map<string, { current: string, older: Set<string> }>}
+ */
+const editedVersions = new Map();
+const MAX_EDITED_VERSIONS = 100;
+
+/**
+ * @param {string} file
+ * @param {string} before
+ * @param {string} after
+ */
+function recordEdit(file, before, after) {
+  const entry = editedVersions.get(file);
+  const older = entry?.current === before ? entry.older : new Set();
+  older.add(before);
+  if (older.size > MAX_EDITED_VERSIONS) older.delete(/** @type {string} */ (older.values().next().value));
+  editedVersions.set(file, { current: after, older });
+}
+
+/**
+ * Whether a page served from version `ver` of `file` has the same element
+ * ordinals as its current content `bytes`. Any change other than an applied
+ * edit ends the chain.
+ * @param {string} file
+ * @param {Buffer} bytes
+ * @param {string} ver
+ */
+function samePositions(file, bytes, ver) {
+  const now = contentHash(bytes);
+  if (ver === now) return true;
+  const entry = editedVersions.get(file);
+  if (entry?.current !== now) {
+    editedVersions.delete(file);
+    return false;
+  }
+  return entry.older.has(ver);
 }
 
 /**
@@ -457,9 +499,13 @@ async function apiEdit(res, body) {
   const source = bytes.toString("utf8");
   const found = oldText === "" ? null : editTarget(source, oldText);
   // With the position of the element the user edited, the run must be that element's own text.
-  const pinned = typeof src === "number" && typeof ver === "string" && contentHash(bytes) === ver;
+  const pinned = typeof src === "number" && typeof ver === "string" && samePositions(file, bytes, ver);
   const applied = found !== null && (!pinned || found.parent === src);
-  if (found && applied) writeFileSync(file, source.slice(0, found.range[0]) + escapeText(newText) + source.slice(found.range[1]));
+  if (found && applied) {
+    const edited = Buffer.from(source.slice(0, found.range[0]) + escapeText(newText) + source.slice(found.range[1]));
+    writeFileSync(file, edited);
+    recordEdit(file, contentHash(bytes), contentHash(edited));
+  }
   /** @type {EditItem} */
   const item = { kind: "edit", board, selector: String(selector ?? ""), oldText, newText, applied };
   if (src === null || typeof src === "number") item.src = src;
@@ -929,7 +975,8 @@ async function serveDesign(res, rel, inject) {
   const segments = urlSegments(rel);
   const file = segments && (await rootFile(root, segments));
   if (!file) return sendJson(res, 404, { error: "not found" });
-  return serveFile(res, file, inject);
+  // Design system pages are not editable, so they get no source positions.
+  return serveFile(res, file, inject, segments[0] !== SYSTEM_DIR);
 }
 
 /**
@@ -946,14 +993,16 @@ function urlSegments(rel) {
  * @param {Res} res
  * @param {string} file
  * @param {boolean} inject Add the overlay script to HTML.
+ * @param {boolean} [stamp] Also add source positions (see stampSources).
  */
-async function serveFile(res, file, inject) {
+async function serveFile(res, file, inject, stamp = false) {
   const type = CONTENT_TYPES[path.extname(file).toLowerCase()] ?? "application/octet-stream";
   /** @type {string | Buffer} */
   let body = await readFile(file);
   if (inject && type.startsWith("text/html")) {
-    const tag = overlayTag(contentHash(body));
-    const html = stampSources(body.toString("utf8"));
+    const tag = overlayTag(stamp ? contentHash(body) : null);
+    const text = body.toString("utf8");
+    const html = stamp ? stampSources(text) : text;
     const at = html.toLowerCase().lastIndexOf("</body>");
     body = at === -1 ? html + tag : html.slice(0, at) + tag + html.slice(at);
   }

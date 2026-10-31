@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, w
 import path from "node:path";
 import { cleanup, cli, http, makeHome, openEvents, readState, until } from "./helpers.js";
 
+const OVERLAY_TAG = '<script type="module" src="/__sketchboard/overlay.js"></script>';
 /** @param {string} source The board file the page was served from. */
 const overlay = (source) =>
   `<script type="module" src="/__sketchboard/overlay.js" data-sb-ver="${createHash("sha256").update(source).digest("hex").slice(0, 16)}"></script>`;
@@ -73,6 +74,10 @@ test("serves root files under /design/ with content types and injects the overla
   assert.equal(a.text, `<html data-sb-src="0"><body data-sb-src="1"><h1 data-sb-src="2">A</h1>${overlay("<html><body><h1>A</h1></body></html>")}</body></html>`);
   assert.equal((await get("/design/home/frag.html")).text, `<h1 data-sb-src="0">no body tag</h1>${overlay("<h1>no body tag</h1>")}`);
   assert.equal((await get("/design/home/a.html?raw=1")).text, "<html><body><h1>A</h1></body></html>");
+
+  // Design system pages are not editable, so they get no source positions.
+  writeFileSync(path.join(root, "systems", "base", "card.html"), "<body><p>Card</p></body>");
+  assert.equal((await get("/design/systems/base/card.html")).text, `<body><p>Card</p>${OVERLAY_TAG}</body>`);
 
   const css = await get("/design/systems/base/tokens.css");
   assert.equal(css.status, 200);
@@ -260,6 +265,49 @@ test("send adds the source position of an edit item's element", async () => {
     items[8],
   ]);
   assert.equal(readFileSync(file, "utf8"), source);
+});
+
+test("source positions stay valid across the server's own applied edits", async () => {
+  writeIndex("chain", ["c.html"]);
+  const file = path.join(dir("chain"), "c.html");
+  writeFileSync(file, "<ul>\n<li>Alpha</li>\n<li>Beta</li>\n<li>Gamma</li>\n</ul>");
+  const served = async () => servedVer((await get("/design/chain/c.html")).text);
+  /** @param {string} oldText @param {string} newText @param {number} src @param {string | undefined} ver */
+  const edit = async (oldText, newText, src, ver) => (await post("/__sketchboard/api/edit", { canvas: "chain", board: "c.html", selector: "li", oldText, newText, src, ver })).json().item;
+  /** @param {unknown[]} items */
+  const send = async (items) => {
+    await post("/__sketchboard/api/send", { canvas: "chain", items });
+    return (await get("/__sketchboard/api/wait?canvas=chain&timeout=1")).json().items;
+  };
+
+  // Several edits queued from the same page: each applied edit changes the file, not the element ordinals.
+  const v0 = await served();
+  const first = await edit("Alpha", "A\nB", 1, v0);
+  assert.equal(first.applied, true);
+  const second = await edit("Beta", "Bee", 2, v0);
+  assert.equal(second.applied, true, "pinning accepts a page version that only applied edits changed");
+  assert.equal((await edit("Gamma", "Gee", 2, v0)).applied, false, "pinning still checks the element");
+  assert.equal(readFileSync(file, "utf8"), "<ul>\n<li>A\nB</li>\n<li>Bee</li>\n<li>Gamma</li>\n</ul>");
+  // Lines come from the current file, where the first edit added a line.
+  assert.deepEqual(await send([first, second]), [
+    { ...first, line: 2, tag: "<li>" },
+    { ...second, line: 4, tag: "<li>" },
+  ]);
+
+  // Any other write ends the chain.
+  writeFileSync(file, "<ul>\n<li>A</li>\n<li>Bee</li>\n<li>Gamma</li>\n</ul>");
+  assert.deepEqual(await send([first, second]), [
+    { ...first, fileChanged: true },
+    { ...second, fileChanged: true },
+  ]);
+
+  // The server keeps at most 100 earlier versions per board.
+  const w0 = await served();
+  const queued = await edit("Bee", "Bee 0", 2, w0);
+  for (let k = 1; k <= 99; k++) assert.equal((await edit(`Bee ${k - 1}`, `Bee ${k}`, 2, w0)).applied, true);
+  assert.deepEqual(await send([queued]), [{ ...queued, line: 3, tag: "<li>" }]);
+  await edit("Bee 99", "Bee 100", 2, w0);
+  assert.deepEqual(await send([queued]), [{ ...queued, fileChanged: true }]);
 });
 
 test("hybrid edit with a source position applies only to a direct text child of that element", async () => {

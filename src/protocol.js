@@ -77,7 +77,8 @@ export const API_PREFIX = "/__sketchboard/api/";
  * `src`, `ver`: from the EditRequest. `send` adds the rest when `ver` is
  * given and `src` is a number: `line` (1-based) and `tag` (the start tag as
  * in the file, cut to 200 characters) of element `src`, and `inTemplate` if it
- * is inside a <template>, when the file still has hash `ver`; otherwise
+ * is inside a <template>, when the file still has the element ordinals of
+ * version `ver` (unchanged, or changed only by applied edits); otherwise
  * `fileChanged`. docs/PROTOCOL.md ("Source positions") defines them.
  * @typedef {{ kind: "edit", board: string, selector: string, oldText: string, newText: string, applied: boolean, newHtml?: string, src?: number | null, ver?: string, line?: number, tag?: string, inTemplate?: true, fileChanged?: true, note?: string }} EditItem
  *
