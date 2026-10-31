@@ -1,11 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { DEFAULT_PORT, DEFAULT_WAIT_TIMEOUT_S, ENDPOINTS, IDLE_TIMEOUT_MS, emptyIndex } from "../src/protocol.js";
+import { DEFAULT_PORT, ENDPOINTS, IDLE_TIMEOUT_MS, emptyIndex } from "../src/protocol.js";
 
 test("protocol constants match the plan", () => {
   assert.equal(DEFAULT_PORT, 4870);
   assert.equal(IDLE_TIMEOUT_MS, 1_800_000);
-  assert.equal(DEFAULT_WAIT_TIMEOUT_S, 540);
 });
 
 test("every API endpoint is under the tool prefix", () => {

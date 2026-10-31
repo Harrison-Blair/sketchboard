@@ -8,23 +8,27 @@
 export const DEFAULT_PORT = 4870;
 export const HOST = "127.0.0.1";
 export const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
-export const DEFAULT_WAIT_TIMEOUT_S = 540;
 // SSE comment line interval. It keeps the browser from dropping an idle
 // stream, and a failed write tells the server that a tab is gone.
 export const SSE_KEEPALIVE_MS = 15 * 1000;
 
+// All canvases live in one root folder: ~/.agents/sketchboard/ (the server
+// and CLI compute it; SKETCHBOARD_HOME overrides it for tests).
+// DESIGN_DIR is the URL segment that maps to the root: /design/<canvas>/<board>.
 export const DESIGN_DIR = "design";
-export const SYSTEM_DIR = "system";
-export const STATE_DIR = ".canvas";
+// Shared design systems: <root>/systems/<name>/. A reserved canvas name.
+export const SYSTEM_DIR = "systems";
+// Tool state: <root>/.state/ (server.json, server.log, shots/).
+export const STATE_DIR = ".state";
 export const SERVER_FILE = "server.json";
 export const INDEX_FILE = "canvas.json";
 
-// Tool-owned URLs. Every other path is a shell page or a file under design/.
+// Tool-owned URLs. Every other path is a shell page or a file under /design/.
 export const TOOL_PREFIX = "/__sketchboard/";
 export const API_PREFIX = "/__sketchboard/api/";
 
 // ---------------------------------------------------------------------------
-// design/<canvas>/canvas.json (v1)
+// <root>/<canvas>/canvas.json (v1)
 
 /**
  * @typedef {{ x: number, y: number, w: number, h: number, title: string }} BoardRect
@@ -62,8 +66,10 @@ export const API_PREFIX = "/__sketchboard/api/";
  * @typedef {{ kind: "circle", board: string, x: number, y: number, w: number, h: number, note: string }} CircleItem
  *
  * `applied: true`: the server replaced oldText in the file. `applied: false`:
- * oldText did not occur exactly once, so the file is unchanged and the agent
- * must make the change.
+ * oldText did not occur exactly once in the file's decoded visible text, or it
+ * occurs in <script> content (as written or decoded), so the file is unchanged
+ * and the agent must make the change. docs/PROTOCOL.md ("Hybrid edit rule")
+ * defines the rule.
  * @typedef {{ kind: "edit", board: string, selector: string, oldText: string, newText: string, applied: boolean, note?: string }} EditItem
  *
  * @typedef {{ kind: "pick", compare: string, board: string, note?: string }} PickItem
@@ -79,26 +85,30 @@ export const API_PREFIX = "/__sketchboard/api/";
 
 /**
  * stdout of `sketchboard wait`. `canvas` is null only when no canvas was
- * given and the wait timed out.
- * @typedef {{ canvas: string | null, items: FeedbackItem[], timedOut?: true }} WaitOutput
+ * given and the wait timed out or closed. `timedOut`: the --timeout passed.
+ * `closed`: no tab has been open on the canvas (on any canvas, without a
+ * canvas) for the idle time, counted across waits from the later of the last
+ * tab and the last `open` of the canvas (server start if neither); held
+ * feedback stays held.
+ * @typedef {{ canvas: string | null, items: FeedbackItem[], timedOut?: true, closed?: true }} WaitOutput
  */
 
 // ---------------------------------------------------------------------------
-// design/.canvas/server.json. The server writes it at start and deletes it at
+// <root>/.state/server.json. The server writes it at start and deletes it at
 // exit. The CLI reads it to find the server, then confirms with GET status.
 
 /**
- * `root` is the absolute path of the directory that holds design/.
+ * `root` is the absolute path of the root folder that holds the canvases.
  * @typedef {{ v: 1, pid: number, port: number, url: string, root: string, startedAt: string }} ServerState
  */
 
 // ---------------------------------------------------------------------------
 // HTTP API. All endpoints are on http://127.0.0.1:<port>. JSON bodies use
 // Content-Type: application/json. Errors return a non-2xx status with
-// ApiError. `:canvas` is a folder name under design/.
+// ApiError. `:canvas` is a folder name in the root folder.
 //
-// CLI note: fetch (undici) has a 300 s default headers timeout, which is
-// shorter than the default wait timeout. Use node:http for `wait`.
+// CLI note: fetch (undici) has a 300 s default headers timeout, which a wait
+// can exceed. Use node:http for `wait`.
 
 /**
  * @typedef {{ error: string }} ApiError
@@ -136,7 +146,7 @@ export const API_PREFIX = "/__sketchboard/api/";
  * An open stream counts as a connected tab for the idle-stop rule.
  * - board: a board file changed; reload that board's frame only.
  * - index: canvas.json changed; re-render the layout from `index`.
- * - system: a file under design/system/ changed; reload every frame.
+ * - system: a file under <root>/systems/ changed; reload every frame.
  * @typedef {{ type: "board", canvas: string, board: string }
  *   | { type: "index", canvas: string, index: CanvasIndex }
  *   | { type: "system" }} ServerEvent
@@ -155,11 +165,11 @@ export const ENDPOINTS = /** @type {const} */ ({
   protocol: { method: "GET", path: "/__sketchboard/protocol.js" },
   // Shell and overlay JS and CSS from the package ui/ folder.
   asset: { method: "GET", path: "/__sketchboard/:file" },
-  // Any file under design/ except design/.canvas/. An .html file gets the
+  // Any file in the root folder except <root>/.state/. An .html file gets the
   // overlay <script> injected; `?raw=1` skips the injection (used by `shot`).
-  // Boards sit at /design/<canvas>/<board>, so ../system/tokens.css works.
+  // Boards sit at /design/<canvas>/<board>, so ../systems/<name>/tokens.css works.
   file: { method: "GET", path: "/design/*" },
-  // Create design/<canvas>/ and an empty canvas.json if missing.
+  // Create <root>/<canvas>/ and an empty canvas.json if missing.
   // OpenRequest -> OpenResponse.
   open: { method: "POST", path: "/__sketchboard/api/open" },
   // -> CanvasListResponse.
@@ -175,9 +185,10 @@ export const ENDPOINTS = /** @type {const} */ ({
   send: { method: "POST", path: "/__sketchboard/api/send" },
   // Hybrid text edit. EditRequest -> EditResponse.
   edit: { method: "POST", path: "/__sketchboard/api/edit" },
-  // Long poll. Query: ?canvas=<name>&timeout=<s>. Without canvas, returns the
-  // first canvas with held feedback. Returns at once if feedback is held,
-  // else when Send arrives, else at timeout. -> WaitOutput.
+  // Long poll. Query: ?canvas=<name>&timeout=<s>, both optional. Without
+  // canvas, returns the first canvas with held feedback. Returns at once if
+  // feedback is held, else when Send arrives, else at the timeout if given,
+  // else when no tab has been open for the idle time (closed). -> WaitOutput.
   wait: { method: "GET", path: "/__sketchboard/api/wait" },
   // -> StatusResponse.
   status: { method: "GET", path: "/__sketchboard/api/status" },

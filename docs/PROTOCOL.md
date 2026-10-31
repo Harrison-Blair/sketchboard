@@ -3,6 +3,8 @@
 The server listens on `http://127.0.0.1:<port>` (default port 4870). The browser shell and the CLI use these endpoints. `src/protocol.js` defines the request and response types as JSDoc typedefs. It has no Node imports. GET `/__sketchboard/protocol.js` serves the package `src/protocol.js`; UI modules import it as `./protocol.js`. JSON errors return a non-2xx status and `{"error": "..."}`.
 
 The server rejects a request whose `Host` is not `127.0.0.1:<port>` or `localhost:<port>`. It rejects a POST whose `Origin` is present and is not the server's own origin.
+It rejects a request to `/__sketchboard/api/*` whose `Sec-Fetch-Site` is present and is not `same-origin` or `none`. The CLI sends no `Origin` and no `Sec-Fetch-*` headers.
+Known v1 limit: boards are served from the shell's origin, so a script that a board loads can call the API as the user. For example, it can send feedback or apply edits.
 
 The server reads a missing `notes`, `compare`, or `order` in `canvas.json` as empty.
 
@@ -12,26 +14,40 @@ The server reads a missing `notes`, `compare`, or `order` in `canvas.json` as em
 | GET | `/c/:canvas` | → HTML | Shell page for one canvas; `open` prints this URL. |
 | GET | `/__sketchboard/protocol.js` | → JS | Serves the package `src/protocol.js`; UI modules import it as `./protocol.js`. |
 | GET | `/__sketchboard/:file` | → JS/CSS | Shell and overlay assets from the package `ui/` folder. |
-| GET | `/design/*` | → file | Any file under `design/` except `design/.canvas/`; HTML gets the overlay script injected, and `?raw=1` skips the injection. |
-| POST | `/__sketchboard/api/open` | `OpenRequest` → `OpenResponse` | Creates `design/<canvas>/` and an empty `canvas.json` if missing and returns the shell URL. |
+| GET | `/design/*` | → file | Any file in the root folder except `<root>/.state/`; HTML gets the overlay script injected, and `?raw=1` skips the injection. |
+| POST | `/__sketchboard/api/open` | `OpenRequest` → `OpenResponse` | Creates `<root>/<canvas>/` and an empty `canvas.json` if missing and returns the shell URL. |
 | GET | `/__sketchboard/api/canvases` | → `CanvasListResponse` | Lists canvases with held feedback and connected tab counts. |
 | GET | `/__sketchboard/api/canvas/:canvas` | → `CanvasIndex` | Returns the parsed `canvas.json`. |
 | POST | `/__sketchboard/api/canvas/:canvas/notes` | `NotesRequest` → `NotesResponse` | Adds, replaces, or deletes titles and stickies in `canvas.json` and keeps every other key. |
 | GET | `/__sketchboard/api/events?canvas=<name>` | → SSE `ServerEvent` | Streams `board`, `index`, and `system` change events; an open stream counts as a connected tab for the idle stop. |
 | POST | `/__sketchboard/api/send` | `SendRequest` → `SendResponse` | Holds a batch of feedback items and an optional message until `wait` reads them. |
-| POST | `/__sketchboard/api/edit` | `EditRequest` → `EditResponse` | Applies a text edit to the board file if the old text occurs exactly once and returns the `edit` item for the Unsent queue. |
-| GET | `/__sketchboard/api/wait?canvas=<name>&timeout=<s>` | → `WaitOutput` | Long poll that returns held feedback, or waits for Send, or returns `timedOut: true` at the timeout. |
-| GET | `/__sketchboard/api/status` | → `StatusResponse` | Returns the URL, project root, pid, canvases, and active `wait` count. |
+| POST | `/__sketchboard/api/edit` | `EditRequest` → `EditResponse` | Applies a text edit to the board file under the hybrid edit rule (below) and returns the `edit` item for the Unsent queue. |
+| GET | `/__sketchboard/api/wait?canvas=<name>&timeout=<s>` | → `WaitOutput` | Long poll that returns held feedback, or waits for Send. Both query parameters are optional. With `timeout`, it returns `timedOut: true` at the timeout; there is no default timeout. It returns `closed: true` when no tab has been open for 30 minutes (see Idle stop). |
+| GET | `/__sketchboard/api/status` | → `StatusResponse` | Returns the URL, root folder, pid, canvases, and active `wait` count. |
 | POST | `/__sketchboard/api/stop` | → `StopResponse` | Replies, closes all streams, deletes `server.json`, and exits. |
+
+## Hybrid edit rule
+
+The server applies an edit only if `oldText` occurs exactly once in the board's decoded visible text and occurs nowhere in `<script>` content. Otherwise it returns `applied: false` and does not change the file.
+
+- Visible text is the text outside tags (so attribute values do not count), outside comments, and outside the contents of `<script>`, `<style>`, `<title>`, `<template>`, `<noscript>`, and `<textarea>`. A match cannot cross a tag.
+- Decoding makes visible text compare like the DOM's `textContent`. Decimal (`&#8594;`) and hexadecimal (`&#x2192;`) references are decoded; 0, surrogates, and values above U+10FFFF become U+FFFD. These named references are decoded: `amp lt gt quot apos nbsp mdash ndash hellip rarr larr uarr darr copy reg trade middot bull rsquo lsquo rdquo ldquo times deg euro pound`. A reference needs its `;`. Other named references stay literal text. CRLF and CR become LF. No other whitespace changes.
+- `<script>` content is checked both as written and decoded, because a script can insert either form as HTML.
+- The server replaces the exact source text of the match, including any references in it, with `newText`. It writes `&`, `<`, and `>` in `newText` as `&amp;`, `&lt;`, and `&gt;`.
 
 ## Idle stop
 
-The server exits after 30 minutes with no open event stream and no `wait` in progress. Held feedback does not keep it alive. The event stream sends a comment line every 15 seconds; a failed write closes that connection.
+The server exits after 30 minutes with no open event stream and no `wait` in progress. Held feedback does not keep it alive.
+
+A `wait` ends with `{"canvas": "<name>", "items": [], "closed": true}` when no tab (event stream) has been open on its canvas for 30 minutes. For a `wait` without a canvas, the rule uses tabs on any canvas, and `canvas` is null. The server tracks when each canvas, and any canvas, last had a tab open or was last opened with `open`, across waits. The 30 minutes count from the later of those times, or from server start if there was neither. So a loop of short `wait --timeout` calls still ends with `closed`, and a wait that starts after 30 minutes without a tab or an `open` closes at once. Held feedback stays held. After a wait closes, the idle-stop countdown counts from the last request or closed tab. `wait` and `status` requests do not count, so with no other activity in that time the server stops right after the reply. The event stream sends a comment line every 15 seconds; a failed write closes that connection.
 
 ## State file
 
-`design/.canvas/server.json` holds `ServerState`: `v`, `pid`, `port`, `url`, `root`, and `startedAt`.
+`<root>/.state/server.json` holds `ServerState`: `v`, `pid`, `port`, `url`, `root`, and `startedAt`. `<root>/.state/` also holds `server.log`, the start lock, `shots/<canvas>/<board>.png`, and a `.gitignore` that contains `*`.
 
 ## CLI contract
 
 `sketchboard --version` prints the package version and exits. It does not start the server.
+
+One server serves every canvas. All canvases live in one root folder, `~/.agents/sketchboard/` (on Windows `%USERPROFILE%\.agents\sketchboard`), and commands work from any current folder. Layout: `<root>/<canvas>/canvas.json` and the canvas's board files; shared design systems in `<root>/systems/<name>/`; tool state in `<root>/.state/`. `systems` is a reserved canvas name. URLs map `/design/` to the root. The environment variable `SKETCHBOARD_HOME` overrides the root folder; it exists for tests.
+Two more variables exist only for tests: `SKETCHBOARD_IDLE_MS` sets the server's idle-stop time in milliseconds (default 30 minutes), and `SKETCHBOARD_SHOT_TIMEOUT_MS` sets the time in milliseconds before `shot` stops a browser run (default 60 000).
