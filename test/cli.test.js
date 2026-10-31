@@ -165,6 +165,15 @@ test("wait prints only WaitOutput JSON", async () => {
     await http(port, "POST", "/__sketchboard/api/send", { body: { canvas: "home", items: [item] } });
     const heldNow = await cli(root, ["wait"]);
     assert.deepEqual(JSON.parse(heldNow.stdout), { canvas: "home", items: [item] });
+
+    // newHtml is raw HTML and passes through unchanged.
+    const edit = {
+      kind: "edit", board: "a.html", selector: "p", oldText: "$12/mo", newText: "$15/mo", applied: false,
+      newHtml: '$<span class="n">15</span>/mo &amp; <b>"tax" \u2192 \u{1F44B}</b>\n<br>',
+    };
+    await http(port, "POST", "/__sketchboard/api/send", { body: { canvas: "home", items: [edit] } });
+    const withHtml = await cli(root, ["wait"]);
+    assert.equal(withHtml.stdout, JSON.stringify({ canvas: "home", items: [edit] }) + "\n");
   } finally {
     await cleanup(root);
   }

@@ -36,6 +36,7 @@ The server applies an edit only if exactly one visible text run of the board, de
 - Decoding makes visible text compare like the DOM's `textContent`. Decimal (`&#8594;`) and hexadecimal (`&#x2192;`) references are decoded; 0, surrogates, and values above U+10FFFF become U+FFFD. These named references are decoded: `amp lt gt quot apos nbsp mdash ndash hellip rarr larr uarr darr copy reg trade middot bull rsquo lsquo rdquo ldquo times deg euro pound`. A reference needs its `;`. Other named references stay literal text. CRLF and CR become LF. No other whitespace changes.
 - `<script>` content is checked both as written and decoded, because a script can insert either form as HTML.
 - The server replaces the exact source text of the trimmed run, including any references in it, with `newText`. Whitespace around it stays as written. It writes `&`, `<`, and `>` in `newText` as `&amp;`, `&lt;`, and `&gt;`.
+- An `edit` item with `applied: false` can carry an optional `newHtml`: the edited element's inner HTML as the user left it in the live page. It is raw HTML, not escaped, and does not include the element's own tag and attributes. The browser fills it; `send` holds it and `wait` returns it unchanged. The server never writes it to a file. An applied edit has no `newHtml`.
 
 ## Idle stop
 

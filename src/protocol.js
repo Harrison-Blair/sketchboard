@@ -71,7 +71,10 @@ export const API_PREFIX = "/__sketchboard/api/";
  * (as written or decoded), so the file is unchanged and the agent must make
  * the change. docs/PROTOCOL.md ("Hybrid edit rule")
  * defines the rule.
- * @typedef {{ kind: "edit", board: string, selector: string, oldText: string, newText: string, applied: boolean, note?: string }} EditItem
+ * `newHtml`: only when applied is false, if the browser has it. The element's
+ * inner HTML as the user left it in the live page: raw, not escaped, without
+ * the element's own tag and attributes. The server never writes it to a file.
+ * @typedef {{ kind: "edit", board: string, selector: string, oldText: string, newText: string, applied: boolean, newHtml?: string, note?: string }} EditItem
  *
  * @typedef {{ kind: "pick", compare: string, board: string, note?: string }} PickItem
  *
