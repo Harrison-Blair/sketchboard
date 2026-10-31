@@ -272,16 +272,17 @@ test("wait adds the source position of an edit item's element", async () => {
 
 test("col tells apart identical start tags on one line", async () => {
   writeIndex("cols", ["t.html"]);
-  writeFileSync(path.join(dir("cols"), "t.html"), "<table>\n<tr><td>Export</td><td>Yes</td><td>Yes</td></tr>\n<p>\u{1F44B} \u00e9</p><b>x</b>\n</table>");
+  writeFileSync(path.join(dir("cols"), "t.html"), "<table>\n<tr><td>Export</td><td>Yes</td><td>Yes</td></tr>\n<p>\u{1F44B} \u00e9</p><b>x</b>\n\u2764\ufe0f<i>y</i>\n</table>");
   const ver = servedVer((await get("/design/cols/t.html")).text);
   const base = { kind: "edit", board: "t.html", selector: "td", oldText: "Yes", newText: "No", applied: false, ver };
-  await post("/__sketchboard/api/send", { canvas: "cols", items: [{ ...base, src: 3 }, { ...base, src: 4 }, { ...base, src: 6 }] });
+  await post("/__sketchboard/api/send", { canvas: "cols", items: [{ ...base, src: 3 }, { ...base, src: 4 }, { ...base, src: 6 }, { ...base, src: 7 }] });
   const got = (await get("/__sketchboard/api/wait?canvas=cols&timeout=1")).json().items;
   assert.deepEqual(got.map((/** @type {any} */ i) => [i.line, i.col, i.tag]), [
     [2, 20, "<td>"],
     [2, 32, "<td>"],
-    // Columns count code points: the emoji is one.
+    // Columns count code points: the emoji is one; a heart with a variation selector is two.
     [3, 11, "<b>"],
+    [4, 3, "<i>"],
   ]);
 });
 
@@ -308,6 +309,21 @@ test("positions are resolved when wait delivers the items, not at send", async (
   await post("/__sketchboard/api/send", { canvas: "late", items: [item] });
   rmSync(file);
   assert.deepEqual((await get("/__sketchboard/api/wait?canvas=late&timeout=1")).json().items, [{ ...item, fileChanged: true }]);
+});
+
+test("positions follow a board symlink retargeted between send and wait", async (t) => {
+  writeIndex("link", ["s.html"]);
+  writeFileSync(path.join(dir("link"), "a.html"), "<p>A</p>");
+  writeFileSync(path.join(dir("link"), "b.html"), "<div>\n<p>B</p>\n</div>");
+  const board = path.join(dir("link"), "s.html");
+  if (!trySymlink(path.join(dir("link"), "a.html"), board, "file")) return t.skip("cannot create symlinks here");
+  const ver = servedVer((await get("/design/link/s.html")).text);
+  const item = { kind: "edit", board: "s.html", selector: "p", oldText: "A", newText: "Z", applied: false, src: 0, ver };
+  await post("/__sketchboard/api/send", { canvas: "link", items: [item] });
+  rmSync(board);
+  trySymlink(path.join(dir("link"), "b.html"), board, "file");
+  // The positions come from the current target, which is not the page the user saw.
+  assert.deepEqual((await get("/__sketchboard/api/wait?canvas=link&timeout=1")).json().items, [{ ...item, fileChanged: true }]);
 });
 
 test("source positions stay valid across the server's own applied edits", async () => {
@@ -591,6 +607,9 @@ test("send and wait: per canvas, no canvas, and immediate return of held items",
   assert.deepEqual((await pending).json(), { canvas: "w1", items: [item] });
 
   assert.equal((await post("/__sketchboard/api/send", { canvas: "w1" })).status, 400);
+  // Items are held as sent, even ones that are not objects.
+  assert.equal((await post("/__sketchboard/api/send", { canvas: "w1", items: [null, 5] })).status, 200);
+  assert.deepEqual((await get("/__sketchboard/api/wait?canvas=w1&timeout=1")).json().items, [null, 5]);
   assert.equal((await post("/__sketchboard/api/send", { canvas: "../x", items: [] })).status, 400);
 });
 

@@ -170,7 +170,7 @@ async function shot(root, args) {
   const rect = index.boards[board];
   if (!rect) throw new Error(`board "${board}" is not in ${indexFile(root, canvas)}`);
   // Without the file the server answers 404, and the browser would save that page as the PNG.
-  if (!(await rootFile(root, [canvas, board]))) throw new Error(`board file ${path.join(root, canvas, board)} does not exist`);
+  if (!rootFile(root, [canvas, board])) throw new Error(`board file ${path.join(root, canvas, board)} does not exist`);
   const out = path.join(root, STATE_DIR, "shots", canvas, `${path.parse(board).name}.png`);
   const url = `${server.url}/design/${canvas}/${encodeURIComponent(board)}?raw=1`;
   await takeShot(browser, url, Math.round(rect.w), Math.round(rect.h), out);

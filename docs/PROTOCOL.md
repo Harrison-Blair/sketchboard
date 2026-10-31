@@ -48,7 +48,7 @@ When the server serves a board HTML page with the overlay (not with `?raw=1`, an
 
 The browser sends the edited element's ordinal as `src` (null if it has no `data-sb-src`) and the page's hash as `ver` in an `EditRequest`. The returned `edit` item keeps both. When `wait` returns held items, the server adds fields to each `edit` item that has a `ver` and a numeric `src`. It resolves them against the board file at that time, not at `send`, so they match the file that the agent reads:
 
-- If the page version `ver` has the same element ordinals as the current file: `line`, the 1-based line where start tag `src` begins (CRLF, CR, and LF each end a line); `col`, the 1-based column of that tag's `<` on its line, counted in Unicode code points from the line start (column 1 is the first character; an emoji counts as one); `tag`, that start tag exactly as in the file, cut to 200 characters; and `inTemplate: true` if the element is inside a `<template>`.
+- If the page version `ver` has the same element ordinals as the current file: `line`, the 1-based line where start tag `src` begins (CRLF, CR, and LF each end a line); `col`, the 1-based column of that tag's `<` on its line, counted in Unicode code points from the line start (column 1 is the first character; each code point counts as one, so 😀 counts as one and ❤️, an emoji plus a variation selector, as two); `tag`, that start tag exactly as in the file, cut to 200 characters; and `inTemplate: true` if the element is inside a `<template>`.
 - Otherwise, or if the file is gone: `fileChanged: true`, and no `line`, `col`, or `tag`.
 
 The server adds nothing to items with `src: null` or without `ver`, and keeps every other field unchanged.

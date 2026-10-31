@@ -320,7 +320,7 @@ function apiIndex(res, canvas) {
 async function apiNotes(res, canvas, body) {
   const err = canvasNameError(canvas);
   if (err) return sendJson(res, 400, { error: err });
-  const file = await rootFile(root, [canvas, INDEX_FILE]);
+  const file = rootFile(root, [canvas, INDEX_FILE]);
   if (!file) return sendJson(res, 404, { error: `no canvas "${canvas}"` });
   let raw;
   try {
@@ -374,29 +374,19 @@ function apiEvents(req, res, query) {
  * @param {Res} res
  * @param {any} body
  */
-async function apiSend(res, body) {
+function apiSend(res, body) {
   const canvas = body?.canvas;
   const err = canvasNameError(canvas);
   if (err) return sendJson(res, 400, { error: err });
   if (!Array.isArray(body.items)) return sendJson(res, 400, { error: "items must be an array" });
-  /** @type {FeedbackItem[]} */
-  const items = body.items;
-  const files = await Promise.all(items.map((item) => (positioned(item) && !boardNameError(item.board) ? rootFile(root, [canvas, item.board]) : null)));
-  items.forEach((item, k) => boardFiles.set(item, files[k]));
   const list = held.get(canvas) ?? [];
-  list.push(...items);
+  list.push(...body.items);
   if (typeof body.message === "string" && body.message.trim() !== "") list.push({ kind: "message", text: body.message });
   held.set(canvas, list);
   const count = list.length;
   deliver();
   sendJson(res, 200, { held: count });
 }
-
-/**
- * The board file of each held item that has a source position, resolved at send.
- * @type {WeakMap<FeedbackItem, string | null>}
- */
-const boardFiles = new WeakMap();
 
 /**
  * @param {FeedbackItem} item
@@ -410,19 +400,14 @@ function positioned(item) {
  * Adds where an edit item's element starts in the board file as it is now,
  * if the file still has the element ordinals of the page the user saw. Runs
  * when the item is delivered, so the agent gets positions in the file it reads.
+ * @param {string} canvas
  * @param {FeedbackItem} item
  * @returns {FeedbackItem}
  */
-function locate(item) {
+function locate(canvas, item) {
   if (!positioned(item)) return item;
-  const file = boardFiles.get(item);
-  /** @type {Buffer | null} */
-  let bytes = null;
-  try {
-    bytes = file ? readFileSync(file) : null;
-  } catch {
-    // The file was deleted or moved after send.
-  }
+  const file = boardNameError(item.board) ? null : rootFile(root, [canvas, item.board]);
+  const bytes = file ? readFileSync(file) : null;
   if (!file || !bytes || !samePositions(file, bytes, item.ver)) return { ...item, fileChanged: true };
   const html = bytes.toString("utf8");
   const tag = regions(html).tags[item.src];
@@ -517,7 +502,7 @@ async function apiEdit(res, body) {
   if (!/\.html?$/i.test(board) || !Object.hasOwn(boards, board)) {
     return sendJson(res, 400, { error: `"${board}" is not an HTML board in ${canvas}/${INDEX_FILE}` });
   }
-  const file = await rootFile(root, [canvas, board]);
+  const file = rootFile(root, [canvas, board]);
   if (!file) return sendJson(res, 404, { error: `no board file "${canvas}/${board}" inside the root folder` });
   // Read and write in one synchronous step so concurrent edits cannot interleave.
   const bytes = readFileSync(file);
@@ -804,7 +789,7 @@ function take(canvas) {
   for (const [name, items] of held) {
     if (items.length > 0 && (canvas === null || canvas === name)) {
       held.delete(name);
-      return { canvas: name, items: items.map(locate) };
+      return { canvas: name, items: items.map((item) => locate(name, item)) };
     }
   }
   return null;
@@ -986,7 +971,7 @@ function broadcast(event, canvas) {
  */
 async function serveUi(res, rel) {
   const segments = urlSegments(rel);
-  const file = segments && (await resolveInside(UI_DIR, segments));
+  const file = segments && resolveInside(UI_DIR, segments);
   if (!file) return sendJson(res, 404, { error: `ui file not found: ${rel}` });
   return serveFile(res, file, false);
 }
@@ -998,7 +983,7 @@ async function serveUi(res, rel) {
  */
 async function serveDesign(res, rel, inject) {
   const segments = urlSegments(rel);
-  const file = segments && (await rootFile(root, segments));
+  const file = segments && rootFile(root, segments);
   if (!file) return sendJson(res, 404, { error: "not found" });
   // Design system pages are not editable, so they get no source positions.
   return serveFile(res, file, inject, segments[0] !== SYSTEM_DIR);

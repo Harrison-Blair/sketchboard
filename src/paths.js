@@ -1,5 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { realpath, stat } from "node:fs/promises";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { INDEX_FILE, SERVER_FILE, STATE_DIR, SYSTEM_DIR } from "./protocol.js";
@@ -93,10 +92,15 @@ export function readIndex(root, canvas) {
  * @param {string} root
  * @param {string[]} segments
  */
-export async function rootFile(root, segments) {
-  const rootReal = await realpath(root).catch(() => null);
-  const file = rootReal && (await resolveInside(rootReal, segments));
-  return file && rootReal && insideRoot(file, rootReal) ? file : null;
+export function rootFile(root, segments) {
+  let rootReal = null;
+  try {
+    rootReal = realpathSync(root);
+  } catch {
+    return null;
+  }
+  const file = resolveInside(rootReal, segments);
+  return file && insideRoot(file, rootReal) ? file : null;
 }
 
 /**
@@ -115,11 +119,11 @@ export function insideRoot(real, rootReal) {
  * @param {string} base
  * @param {string[]} segments
  */
-export async function resolveInside(base, segments) {
+export function resolveInside(base, segments) {
   try {
-    const baseReal = await realpath(base);
-    const real = await realpath(path.join(baseReal, ...segments));
-    if (!real.startsWith(baseReal + path.sep) || !(await stat(real)).isFile()) return null;
+    const baseReal = realpathSync(base);
+    const real = realpathSync(path.join(baseReal, ...segments));
+    if (!real.startsWith(baseReal + path.sep) || !statSync(real).isFile()) return null;
     return real;
   } catch {
     return null;
