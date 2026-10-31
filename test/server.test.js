@@ -634,6 +634,11 @@ test("hybrid edit matches decoded visible text and replaces the original entity 
   await check("<p>Next &#8594; step &#x2192;</p>", "Next \u2192 step \u2192", "Go", "<p>Go</p>");
   await check("<p>Price:&nbsp;10&nbsp;EUR</p>", "Price:\u00a010\u00a0EUR", "Price: 12 EUR", "<p>Price: 12 EUR</p>");
   await check("<p>Line one\r\nline two</p>", "Line one\nline two", "1", "<p>1</p>");
+  // A run that spans a CRLF in the file gets CRLF for the newlines in newText; an LF run keeps LF.
+  await check('<p id="m">Long sentence that\r\n  continues here.</p>\r\n', "Long sentence that\n  continues here.", "Long sentence that\n  continues here.Y", '<p id="m">Long sentence that\r\n  continues here.Y</p>\r\n');
+  await check("<p>a\r\nb</p>", "a\nb", "a\r\nb\nc", "<p>a\r\nb\r\nc</p>");
+  await check('<p id="m">Long sentence that\n  continues here.</p>\n', "Long sentence that\n  continues here.", "Long sentence that\n  continues here.Y", '<p id="m">Long sentence that\n  continues here.Y</p>\n');
+  await check("<h1>Title</h1>\r\n<p>a\nb</p>\r\n", "a\nb", "a\nc", "<h1>Title</h1>\r\n<p>a\nc</p>\r\n");
   // Upper-case X and hex digits; 0, surrogates, and values past U+10FFFF decode to U+FFFD.
   await check("<p>&#X2192; &#xA9;</p>", "\u2192 \u00a9", "Go", "<p>Go</p>");
   await check("<p>a&#0;b&#xD800;c&#x110000;d</p>", "a\ufffdb\ufffdc\ufffdd", "x", "<p>x</p>");

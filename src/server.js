@@ -546,7 +546,10 @@ async function apiEdit(res, body) {
   const pinned = typeof src === "number" && typeof ver === "string" && samePositions(file, bytes, ver);
   const applied = found !== null && (!pinned || found.parent === src);
   if (found && applied) {
-    const edited = Buffer.from(source.slice(0, found.range[0]) + escapeText(newText) + source.slice(found.range[1]));
+    // The DOM turns CRLF into LF, so keep the file's CRLF where the replaced text had it.
+    const crlf = source.slice(found.range[0], found.range[1]).includes("\r\n");
+    const text = crlf ? newText.replace(/(?<!\r)\n/g, "\r\n") : newText;
+    const edited = Buffer.from(source.slice(0, found.range[0]) + escapeText(text) + source.slice(found.range[1]));
     writeFileSync(file, edited);
     recordEdit(file, contentHash(bytes), contentHash(edited));
   }
