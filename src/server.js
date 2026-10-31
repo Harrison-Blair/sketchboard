@@ -212,6 +212,7 @@ async function api(req, res, method, route, query) {
     events: ["GET", () => apiEvents(req, res, query)],
     send: ["POST", () => readBody(req).then((b) => apiSend(res, b))],
     edit: ["POST", () => readBody(req).then((b) => apiEdit(res, b))],
+    locate: ["POST", () => readBody(req).then((b) => apiLocate(res, b))],
     wait: ["GET", () => apiWait(res, query)],
     status: ["GET", () => apiStatus(res)],
     stop: ["POST", () => apiStop(res)],
@@ -386,6 +387,33 @@ function apiSend(res, body) {
   const count = list.length;
   deliver();
   sendJson(res, 200, { held: count });
+}
+
+/**
+ * Recomputes the source positions of items that `wait` returned, against the
+ * board files now. Holds and changes nothing.
+ * @param {Res} res
+ * @param {any} body
+ */
+function apiLocate(res, body) {
+  const canvas = body?.canvas;
+  const err = canvasNameError(canvas);
+  if (err) return sendJson(res, 400, { error: err });
+  if (!Array.isArray(body.items)) return sendJson(res, 400, { error: "items must be an array" });
+  /** @type {FeedbackItem[]} */
+  const items = body.items;
+  sendJson(res, 200, { canvas, items: items.map((item) => locate(canvas, withoutPosition(item))) });
+}
+
+/**
+ * An edit item without the fields that locate adds.
+ * @param {FeedbackItem} item
+ * @returns {FeedbackItem}
+ */
+function withoutPosition(item) {
+  if (item?.kind !== "edit") return item;
+  const { line, col, tag, inTemplate, fileChanged, ...rest } = item;
+  return rest;
 }
 
 /**

@@ -24,6 +24,7 @@ All canvases live in one folder, `~/.agents/sketchboard/` (on Windows `%USERPROF
 |---|---|
 | `sketchboard open <canvas>` | Start the server if needed, create the canvas if missing, and print the URL. |
 | `sketchboard wait [<canvas>] [--timeout <s>]` | Block until you press Send, then print the feedback as JSON. There is no timeout unless you give one. The wait ends with `"closed": true` when no browser tab has been open on the canvas (on any canvas, without `<canvas>`) for 30 minutes. |
+| `sketchboard locate <canvas> <file>` | Print saved `wait` output (the file holds it, or its `items` array) with the edited elements' positions (`line`, `col`, `tag`) recomputed against the board files now. Run it right before you change a board file. |
 | `sketchboard status` | Show the server URL, the canvases, held feedback, and open tabs. |
 | `sketchboard stop` | Stop the server. |
 | `sketchboard shot <canvas> <board>` | Save a PNG of one board to `.state/shots/<canvas>/` with a local Chrome, Chromium, Edge, or Firefox. |

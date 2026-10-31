@@ -9,6 +9,7 @@ import { findBrowser, takeShot } from "./shot.js";
 const USAGE = `Usage:
   sketchboard open <canvas>
   sketchboard wait [<canvas>] [--timeout <s>]   (no timeout unless given)
+  sketchboard locate <canvas> <file>   (file: saved wait output, or its items array)
   sketchboard status
   sketchboard stop
   sketchboard shot <canvas> <board>
@@ -34,6 +35,8 @@ async function main(args) {
       return open(root, rest);
     case "wait":
       return wait(root, rest);
+    case "locate":
+      return locate(root, rest);
     case "status":
       return status(root, rest);
     case "stop":
@@ -115,6 +118,21 @@ async function wait(root, args) {
     throw new Error(`lost the connection to the server: ${/** @type {Error} */ (err).message}`);
   }
   process.stdout.write(JSON.stringify(ok(reply)) + "\n");
+}
+
+/**
+ * Prints saved `wait` items with their source positions recomputed against the board files now.
+ * @param {string} root
+ * @param {string[]} args
+ */
+async function locate(root, args) {
+  const [canvas, file] = positionals(args, 2);
+  checkCanvas(canvas);
+  const saved = JSON.parse(readFileSync(file, "utf8"));
+  const items = Array.isArray(saved) ? saved : saved?.items;
+  if (!Array.isArray(items)) throw new Error(`${file} holds neither wait output with "items" nor an items array`);
+  const server = await ensureServer(root);
+  process.stdout.write(JSON.stringify(ok(await api(server.port, "POST", "locate", { canvas, items }))) + "\n");
 }
 
 /**

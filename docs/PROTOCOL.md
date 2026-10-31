@@ -23,6 +23,7 @@ The server reads a missing `notes`, `compare`, or `order` in `canvas.json` as em
 | POST | `/__sketchboard/api/send` | `SendRequest` → `SendResponse` | Holds a batch of feedback items and an optional message until `wait` reads them. |
 | POST | `/__sketchboard/api/edit` | `EditRequest` → `EditResponse` | Applies a text edit to the board file under the hybrid edit rule (below) and returns the `edit` item for the Unsent queue. |
 | GET | `/__sketchboard/api/wait?canvas=<name>&timeout=<s>` | → `WaitOutput` | Long poll that returns held feedback, or waits for Send. Both query parameters are optional. With `timeout`, it returns `timedOut: true` at the timeout; there is no default timeout. It returns `closed: true` when no tab has been open for 30 minutes (see Idle stop). |
+| POST | `/__sketchboard/api/locate` | `LocateRequest` → `WaitOutput` | Recomputes the source positions of items that `wait` returned, against the board files now (see Source positions). Holds and changes nothing. |
 | GET | `/__sketchboard/api/status` | → `StatusResponse` | Returns the URL, root folder, pid, canvases, and active `wait` count. |
 | POST | `/__sketchboard/api/stop` | → `StopResponse` | Replies, closes all streams, deletes `server.json`, and exits. |
 
@@ -52,6 +53,8 @@ The browser sends the edited element's ordinal as `src` and the page's hash as `
 - Otherwise, or if the file is gone or cannot be read: `fileChanged: true`, and no `line`, `col`, or `tag`.
 
 The server adds nothing to items with `src: null` or without `ver`, and keeps every other field unchanged.
+
+The user can keep editing after `wait` returns, and each applied edit can move lines. `POST /__sketchboard/api/locate` with `{canvas, items}` returns `{canvas, items}` with the same items. In each `edit` item it first removes `line`, `col`, `tag`, `inTemplate`, and `fileChanged`, then adds them again by the rules above, against the board file now. Other items stay unchanged. `sketchboard locate <canvas> <file>` sends it: the file holds saved `wait` output or its `items` array, and the command prints the result as `wait` does. An agent runs it right before it changes a board file.
 
 A version has the same element ordinals as the current file if its hash equals the file's current hash, or if only edits that the server applied changed the file since that version. An applied edit changes only text between tags, so the ordinals stay the same. `line`, `col`, and `tag` always come from the current file. The server forgets those earlier versions when any other change reaches the file (for example, the agent saves it), and keeps at most the last 100 per board. Pages under `/design/systems/` get neither attribute: the overlay `<script>` tag has no `data-sb-ver`.
 

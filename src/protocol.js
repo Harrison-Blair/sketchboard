@@ -138,6 +138,9 @@ export const API_PREFIX = "/__sketchboard/api/";
  * @typedef {{ canvas: string, items: FeedbackItem[], message?: string }} SendRequest
  * @typedef {{ held: number }} SendResponse
  *
+ * `items`: as `wait` returned them. The response is a WaitOutput for `canvas`.
+ * @typedef {{ canvas: string, items: FeedbackItem[] }} LocateRequest
+ *
  * `src`: the edited element's data-sb-src ordinal. Null if the element has no
  * data-sb-src, or if more than one element in the page has the same
  * data-sb-src (a script copied a static element, so neither the copy nor the
@@ -206,6 +209,9 @@ export const ENDPOINTS = /** @type {const} */ ({
   // feedback is held, else when Send arrives, else at the timeout if given,
   // else when no tab has been open for the idle time (closed). -> WaitOutput.
   wait: { method: "GET", path: "/__sketchboard/api/wait" },
+  // Recompute the source positions of items that `wait` returned, against
+  // the board files now. Holds and changes nothing. LocateRequest -> WaitOutput.
+  locate: { method: "POST", path: "/__sketchboard/api/locate" },
   // -> StatusResponse.
   status: { method: "GET", path: "/__sketchboard/api/status" },
   // Reply, then close all streams, delete server.json, and exit. -> StopResponse.

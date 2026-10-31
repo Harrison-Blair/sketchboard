@@ -208,6 +208,41 @@ test("idle stop: exits when idle, stays up while a stream is open, and after a w
   }
 });
 
+test("locate reads saved wait output or its items and prints positions as wait does", async () => {
+  const root = makeHome();
+  try {
+    await cli(root, ["open", "home"]);
+    const { port } = readState(root);
+    const board = path.join(root, "home", "b.html");
+    writeFileSync(path.join(root, "home", "canvas.json"), JSON.stringify({ v: 1, boards: { "b.html": { x: 0, y: 0, w: 100, h: 100 } } }));
+    writeFileSync(board, "<p>One\ntwo</p>\n<h2>Title</h2>");
+    const served = await http(port, "GET", "/design/home/b.html");
+    const ver = /data-sb-ver="([^"]+)"/.exec(served.text)?.[1];
+    const item = { kind: "edit", board: "b.html", selector: "h2", oldText: "Title", newText: "Name", applied: false, src: 1, ver };
+    await http(port, "POST", "/__sketchboard/api/send", { body: { canvas: "home", items: [item] } });
+    const waited = await cli(root, ["wait", "home"]);
+    const saved = path.join(root, "wait.json");
+    writeFileSync(saved, waited.stdout);
+    assert.deepEqual(JSON.parse(waited.stdout).items, [{ ...item, line: 3, col: 1, tag: "<h2>" }]);
+
+    await http(port, "POST", "/__sketchboard/api/edit", { body: { canvas: "home", board: "b.html", selector: "p", oldText: "One\ntwo", newText: "One two", src: 0, ver } });
+    const expected = JSON.stringify({ canvas: "home", items: [{ ...item, line: 2, col: 1, tag: "<h2>" }] }) + "\n";
+    const fromOutput = await cli(root, ["locate", "home", saved]);
+    assert.equal(fromOutput.code, 0, fromOutput.stderr);
+    assert.equal(fromOutput.stdout, expected);
+    writeFileSync(saved, JSON.stringify(JSON.parse(waited.stdout).items));
+    assert.equal((await cli(root, ["locate", "home", saved])).stdout, expected);
+
+    writeFileSync(saved, "{}");
+    const bad = await cli(root, ["locate", "home", saved]);
+    assert.notEqual(bad.code, 0);
+    assert.match(bad.stderr, /items/);
+    assert.notEqual((await cli(root, ["locate", "home"])).code, 0);
+  } finally {
+    await cleanup(root);
+  }
+});
+
 test("wait without --timeout blocks until feedback is sent", async () => {
   const root = makeHome();
   try {

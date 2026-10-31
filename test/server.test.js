@@ -311,6 +311,40 @@ test("positions are resolved when wait delivers the items, not at send", async (
   assert.deepEqual((await get("/__sketchboard/api/wait?canvas=late&timeout=1")).json().items, [{ ...item, fileChanged: true }]);
 });
 
+test("locate recomputes positions against the current file and holds nothing", async () => {
+  writeIndex("loc", ["l.html"]);
+  const file = path.join(dir("loc"), "l.html");
+  writeFileSync(file, "<body>\n<p>One\ntwo</p>\n<h2>Title</h2>\n</body>");
+  const ver = servedVer((await get("/design/loc/l.html")).text);
+  const item = { kind: "edit", board: "l.html", selector: "h2", oldText: "Title", newText: "Name", applied: false, src: 2, ver };
+  const pin = { kind: "pin", board: "l.html", x: 1, y: 2, selector: "h2", tag: "h2", text: "Title", note: "n" };
+  await post("/__sketchboard/api/send", { canvas: "loc", items: [item, pin] });
+  const delivered = (await get("/__sketchboard/api/wait?canvas=loc&timeout=1")).json().items;
+  assert.deepEqual(delivered, [{ ...item, line: 4, col: 1, tag: "<h2>" }, pin]);
+  await post("/__sketchboard/api/send", { canvas: "loc", items: [], message: "still held" });
+
+  // The user keeps editing after the wait: an applied edit removes a line above the element.
+  const joined = (await post("/__sketchboard/api/edit", { canvas: "loc", board: "l.html", selector: "p", oldText: "One\ntwo", newText: "One two", src: 1, ver })).json().item;
+  assert.equal(joined.applied, true);
+  /** @param {unknown[]} items */
+  const locate = async (items) => {
+    const r = await post("/__sketchboard/api/locate", { canvas: "loc", items });
+    assert.equal(r.status, 200);
+    return r.json();
+  };
+  assert.deepEqual(await locate(delivered), { canvas: "loc", items: [{ ...item, line: 3, col: 1, tag: "<h2>" }, pin] });
+
+  // An outside write: the earlier position fields are dropped.
+  writeFileSync(file, "<body><h2>Title</h2></body>");
+  assert.deepEqual(await locate(delivered), { canvas: "loc", items: [{ ...item, fileChanged: true }, pin] });
+  assert.equal((await post("/__sketchboard/api/locate", { canvas: "loc" })).status, 400);
+  assert.equal((await post("/__sketchboard/api/locate", { canvas: "../x", items: [] })).status, 400);
+
+  // locate holds nothing and takes nothing.
+  assert.deepEqual((await get("/__sketchboard/api/wait?canvas=loc&timeout=1")).json().items, [{ kind: "message", text: "still held" }]);
+  assert.equal(readFileSync(file, "utf8"), "<body><h2>Title</h2></body>");
+});
+
 test("an unreadable board file gives fileChanged and keeps the held batch", async (t) => {
   if (process.platform === "win32") return t.skip("chmod does not block reads on Windows");
   if (process.getuid?.() === 0) return t.skip("root can read any file");
