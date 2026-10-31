@@ -74,13 +74,14 @@ export const API_PREFIX = "/__sketchboard/api/";
  * `newHtml`: only when applied is false, if the browser has it. The element's
  * inner HTML as the user left it in the live page: raw, not escaped, without
  * the element's own tag and attributes. The server never writes it to a file.
- * `src`, `ver`: from the EditRequest. `send` adds the rest when `ver` is
- * given and `src` is a number: `line` (1-based) and `tag` (the start tag as
- * in the file, cut to 200 characters) of element `src`, and `inTemplate` if it
- * is inside a <template>, when the file still has the element ordinals of
- * version `ver` (unchanged, or changed only by applied edits); otherwise
- * `fileChanged`. docs/PROTOCOL.md ("Source positions") defines them.
- * @typedef {{ kind: "edit", board: string, selector: string, oldText: string, newText: string, applied: boolean, newHtml?: string, src?: number | null, ver?: string, line?: number, tag?: string, inTemplate?: true, fileChanged?: true, note?: string }} EditItem
+ * `src`, `ver`: from the EditRequest. When `wait` returns the item, the
+ * server adds the rest if `ver` is given and `src` is a number, from the file
+ * at that time: `line` and `col` (1-based; col in UTF-16 code units) and `tag`
+ * (the start tag as in the file, cut to 200 characters) of element `src`, and
+ * `inTemplate` if it is inside a <template>, when the file still has the
+ * element ordinals of version `ver` (unchanged, or changed only by applied
+ * edits); otherwise `fileChanged`. docs/PROTOCOL.md ("Source positions") defines them.
+ * @typedef {{ kind: "edit", board: string, selector: string, oldText: string, newText: string, applied: boolean, newHtml?: string, src?: number | null, ver?: string, line?: number, col?: number, tag?: string, inTemplate?: true, fileChanged?: true, note?: string }} EditItem
  *
  * @typedef {{ kind: "pick", compare: string, board: string, note?: string }} PickItem
  *

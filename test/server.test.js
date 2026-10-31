@@ -221,7 +221,7 @@ ${overlay(source)}</body></HTML>`);
 /** @param {string} served A page served under /design/. */
 const servedVer = (served) => /data-sb-ver="([^"]+)"/.exec(served)?.[1];
 
-test("send adds the source position of an edit item's element", async () => {
+test("wait adds the source position of an edit item's element", async () => {
   writeIndex("srcs", ["s.html"]);
   const long = "y".repeat(300);
   const source = [
@@ -249,22 +249,65 @@ test("send adds the source position of an edit item's element", async () => {
     { ...base, src: null, ver: "0000000000000000" },
     { ...base, board: "gone.html", src: 5, ver },
     { ...base, src: 99, ver },
+    { ...base, src: 1, ver },
     { kind: "pin", board: "s.html", x: 1, y: 2, selector: "li", tag: "li", text: "First", note: "n" },
   ];
   await post("/__sketchboard/api/send", { canvas: "srcs", items });
   const got = (await get("/__sketchboard/api/wait?canvas=srcs&timeout=1")).json();
   assert.deepEqual(got.items, [
-    { ...items[0], line: 5, tag: '<li class="a">' },
-    { ...items[1], line: 3, tag: '<p class="row">', inTemplate: true },
-    { ...items[2], line: 7, tag: `<div title="${long}">`.slice(0, 200) },
+    { ...items[0], line: 5, col: 3, tag: '<li class="a">' },
+    { ...items[1], line: 3, col: 11, tag: '<p class="row">', inTemplate: true },
+    { ...items[2], line: 7, col: 1, tag: `<div title="${long}">`.slice(0, 200) },
     { ...items[3], fileChanged: true },
     items[4],
     items[5],
     { ...items[6], fileChanged: true },
     items[7],
-    items[8],
+    // A lone CR ends a line for col too.
+    { ...items[8], line: 2, col: 1, tag: "<body>" },
+    items[9],
   ]);
   assert.equal(readFileSync(file, "utf8"), source);
+});
+
+test("col tells apart identical start tags on one line", async () => {
+  writeIndex("cols", ["t.html"]);
+  writeFileSync(path.join(dir("cols"), "t.html"), "<table>\n<tr><td>Export</td><td>Yes</td><td>Yes</td></tr>\n<p>\u{1F44B} \u00e9</p><b>x</b>\n</table>");
+  const ver = servedVer((await get("/design/cols/t.html")).text);
+  const base = { kind: "edit", board: "t.html", selector: "td", oldText: "Yes", newText: "No", applied: false, ver };
+  await post("/__sketchboard/api/send", { canvas: "cols", items: [{ ...base, src: 3 }, { ...base, src: 4 }, { ...base, src: 6 }] });
+  const got = (await get("/__sketchboard/api/wait?canvas=cols&timeout=1")).json().items;
+  assert.deepEqual(got.map((/** @type {any} */ i) => [i.line, i.col, i.tag]), [
+    [2, 20, "<td>"],
+    [2, 32, "<td>"],
+    // Columns count UTF-16 code units: the emoji is two.
+    [3, 12, "<b>"],
+  ]);
+});
+
+test("positions are resolved when wait delivers the items, not at send", async () => {
+  writeIndex("late", ["l.html"]);
+  const file = path.join(dir("late"), "l.html");
+  writeFileSync(file, "<body>\n<p>One\ntwo</p>\n<h2>Title</h2>\n</body>");
+  const ver = servedVer((await get("/design/late/l.html")).text);
+  const item = { kind: "edit", board: "l.html", selector: "h2", oldText: "Title", newText: "Name", applied: false, src: 2, ver };
+  await post("/__sketchboard/api/send", { canvas: "late", items: [item] });
+  // An applied edit between two sends removes a line above the queued item's element.
+  const joined = (await post("/__sketchboard/api/edit", { canvas: "late", board: "l.html", selector: "p", oldText: "One\ntwo", newText: "One two", src: 1, ver })).json().item;
+  assert.equal(joined.applied, true);
+  await post("/__sketchboard/api/send", { canvas: "late", items: [joined] });
+  const got = (await get("/__sketchboard/api/wait?canvas=late&timeout=1")).json().items;
+  assert.deepEqual(got, [
+    { ...item, line: 3, col: 1, tag: "<h2>" },
+    { ...joined, line: 2, col: 1, tag: "<p>" },
+  ]);
+  // A change after send and before wait also counts.
+  await post("/__sketchboard/api/send", { canvas: "late", items: [item] });
+  writeFileSync(file, "<body><h2>Title</h2></body>");
+  assert.deepEqual((await get("/__sketchboard/api/wait?canvas=late&timeout=1")).json().items, [{ ...item, fileChanged: true }]);
+  await post("/__sketchboard/api/send", { canvas: "late", items: [item] });
+  rmSync(file);
+  assert.deepEqual((await get("/__sketchboard/api/wait?canvas=late&timeout=1")).json().items, [{ ...item, fileChanged: true }]);
 });
 
 test("source positions stay valid across the server's own applied edits", async () => {
@@ -290,8 +333,8 @@ test("source positions stay valid across the server's own applied edits", async 
   assert.equal(readFileSync(file, "utf8"), "<ul>\n<li>A\nB</li>\n<li>Bee</li>\n<li>Gamma</li>\n</ul>");
   // Lines come from the current file, where the first edit added a line.
   assert.deepEqual(await send([first, second]), [
-    { ...first, line: 2, tag: "<li>" },
-    { ...second, line: 4, tag: "<li>" },
+    { ...first, line: 2, col: 1, tag: "<li>" },
+    { ...second, line: 4, col: 1, tag: "<li>" },
   ]);
 
   // Any other write ends the chain.
@@ -305,7 +348,7 @@ test("source positions stay valid across the server's own applied edits", async 
   const w0 = await served();
   const queued = await edit("Bee", "Bee 0", 2, w0);
   for (let k = 1; k <= 99; k++) assert.equal((await edit(`Bee ${k - 1}`, `Bee ${k}`, 2, w0)).applied, true);
-  assert.deepEqual(await send([queued]), [{ ...queued, line: 3, tag: "<li>" }]);
+  assert.deepEqual(await send([queued]), [{ ...queued, line: 3, col: 1, tag: "<li>" }]);
   await edit("Bee 99", "Bee 100", 2, w0);
   assert.deepEqual(await send([queued]), [{ ...queued, fileChanged: true }]);
 });

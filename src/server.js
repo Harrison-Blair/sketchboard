@@ -379,7 +379,10 @@ async function apiSend(res, body) {
   const err = canvasNameError(canvas);
   if (err) return sendJson(res, 400, { error: err });
   if (!Array.isArray(body.items)) return sendJson(res, 400, { error: "items must be an array" });
-  const items = await Promise.all(body.items.map((/** @type {FeedbackItem} */ item) => locate(canvas, item)));
+  /** @type {FeedbackItem[]} */
+  const items = body.items;
+  const files = await Promise.all(items.map((item) => (positioned(item) && !boardNameError(item.board) ? rootFile(root, [canvas, item.board]) : null)));
+  items.forEach((item, k) => boardFiles.set(item, files[k]));
   const list = held.get(canvas) ?? [];
   list.push(...items);
   if (typeof body.message === "string" && body.message.trim() !== "") list.push({ kind: "message", text: body.message });
@@ -390,22 +393,44 @@ async function apiSend(res, body) {
 }
 
 /**
- * Adds where an edit item's element starts in the board file, if the file is
- * still the one the page was served from.
- * @param {string} canvas
- * @param {FeedbackItem} item
- * @returns {Promise<FeedbackItem>}
+ * The board file of each held item that has a source position, resolved at send.
+ * @type {WeakMap<FeedbackItem, string | null>}
  */
-async function locate(canvas, item) {
-  if (item?.kind !== "edit" || typeof item.ver !== "string" || typeof item.src !== "number") return item;
-  const file = boardNameError(item.board) ? null : await rootFile(root, [canvas, item.board]);
-  const bytes = file && readFileSync(file);
-  if (!bytes || !samePositions(file, bytes, item.ver)) return { ...item, fileChanged: true };
+const boardFiles = new WeakMap();
+
+/**
+ * @param {FeedbackItem} item
+ * @returns {item is EditItem & { src: number, ver: string }}
+ */
+function positioned(item) {
+  return item?.kind === "edit" && typeof item.ver === "string" && typeof item.src === "number";
+}
+
+/**
+ * Adds where an edit item's element starts in the board file as it is now,
+ * if the file still has the element ordinals of the page the user saw. Runs
+ * when the item is delivered, so the agent gets positions in the file it reads.
+ * @param {FeedbackItem} item
+ * @returns {FeedbackItem}
+ */
+function locate(item) {
+  if (!positioned(item)) return item;
+  const file = boardFiles.get(item);
+  /** @type {Buffer | null} */
+  let bytes = null;
+  try {
+    bytes = file ? readFileSync(file) : null;
+  } catch {
+    // The file was deleted or moved after send.
+  }
+  if (!file || !bytes || !samePositions(file, bytes, item.ver)) return { ...item, fileChanged: true };
   const html = bytes.toString("utf8");
   const tag = regions(html).tags[item.src];
   if (!tag) return item;
-  const line = (html.slice(0, tag.start).match(/\r\n?|\n/g)?.length ?? 0) + 1;
-  return { ...item, line, tag: html.slice(tag.start, tag.end).slice(0, 200), ...(tag.inTemplate && { inTemplate: true }) };
+  const before = html.slice(0, tag.start);
+  const line = (before.match(/\r\n?|\n/g)?.length ?? 0) + 1;
+  const col = tag.start - Math.max(before.lastIndexOf("\n"), before.lastIndexOf("\r"));
+  return { ...item, line, col, tag: html.slice(tag.start, tag.end).slice(0, 200), ...(tag.inTemplate && { inTemplate: true }) };
 }
 
 /**
@@ -779,7 +804,7 @@ function take(canvas) {
   for (const [name, items] of held) {
     if (items.length > 0 && (canvas === null || canvas === name)) {
       held.delete(name);
-      return { canvas: name, items };
+      return { canvas: name, items: items.map(locate) };
     }
   }
   return null;

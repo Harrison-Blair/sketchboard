@@ -46,14 +46,14 @@ When the server serves a board HTML page with the overlay (not with `?raw=1`, an
 - `data-sb-src="N"` on every element start tag. N is the 0-based ordinal of that start tag in the file, in source order. The count includes every element start tag (also `<script>`, `<style>`, `<title>`, `<textarea>`, `<noscript>`, void and self-closing tags, and SVG children) and the tags inside `<template>` content. It excludes tags in comments and in the raw-text contents of `<script>`, `<style>`, `<title>`, `<textarea>`, and `<noscript>`. A `>` inside a quoted attribute value does not end a tag. Elements that a script creates have no `data-sb-src`; a clone copies the attribute of its source.
 - `data-sb-ver="<hash>"` on the injected overlay `<script>` tag. The hash is the first 16 hexadecimal characters of the SHA-256 of the file's exact bytes.
 
-The browser sends the edited element's ordinal as `src` (null if it has no `data-sb-src`) and the page's hash as `ver` in an `EditRequest`. The returned `edit` item keeps both. `send` adds fields to each `edit` item that has a `ver` and a numeric `src`:
+The browser sends the edited element's ordinal as `src` (null if it has no `data-sb-src`) and the page's hash as `ver` in an `EditRequest`. The returned `edit` item keeps both. When `wait` returns held items, the server adds fields to each `edit` item that has a `ver` and a numeric `src`. It resolves them against the board file at that time, not at `send`, so they match the file that the agent reads:
 
-- If the page version `ver` has the same element ordinals as the current file: `line`, the 1-based line where start tag `src` begins (CRLF, CR, and LF each end a line); `tag`, that start tag exactly as in the file, cut to 200 characters; and `inTemplate: true` if the element is inside a `<template>`.
-- Otherwise, or if the file is gone: `fileChanged: true`, and no `line` or `tag`.
+- If the page version `ver` has the same element ordinals as the current file: `line`, the 1-based line where start tag `src` begins (CRLF, CR, and LF each end a line); `col`, the 1-based column of that tag's `<` on its line, counted in UTF-16 code units (as JavaScript string indexes count) from the line start; `tag`, that start tag exactly as in the file, cut to 200 characters; and `inTemplate: true` if the element is inside a `<template>`.
+- Otherwise, or if the file is gone: `fileChanged: true`, and no `line`, `col`, or `tag`.
 
-`send` adds nothing to items with `src: null` or without `ver`, and keeps every other field unchanged.
+The server adds nothing to items with `src: null` or without `ver`, and keeps every other field unchanged.
 
-A version has the same element ordinals as the current file if its hash equals the file's current hash, or if only edits that the server applied changed the file since that version. An applied edit changes only text between tags, so the ordinals stay the same. `line` and `tag` always come from the current file. The server forgets those earlier versions when any other change reaches the file (for example, the agent saves it), and keeps at most the last 100 per board. Pages under `/design/systems/` get neither attribute: the overlay `<script>` tag has no `data-sb-ver`.
+A version has the same element ordinals as the current file if its hash equals the file's current hash, or if only edits that the server applied changed the file since that version. An applied edit changes only text between tags, so the ordinals stay the same. `line`, `col`, and `tag` always come from the current file. The server forgets those earlier versions when any other change reaches the file (for example, the agent saves it), and keeps at most the last 100 per board. Pages under `/design/systems/` get neither attribute: the overlay `<script>` tag has no `data-sb-ver`.
 
 ## Idle stop
 
