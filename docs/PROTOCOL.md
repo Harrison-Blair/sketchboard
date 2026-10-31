@@ -28,12 +28,14 @@ The server reads a missing `notes`, `compare`, or `order` in `canvas.json` as em
 
 ## Hybrid edit rule
 
-The server applies an edit only if `oldText` occurs exactly once in the board's decoded visible text and occurs nowhere in `<script>` content. Otherwise it returns `applied: false` and does not change the file.
+The server applies an edit only if exactly one visible text run of the board, decoded and trimmed, equals `oldText`, and `oldText` occurs nowhere in `<script>` content. Otherwise it returns `applied: false` and does not change the file.
 
-- Visible text is the text outside tags (so attribute values do not count), outside comments, and outside the contents of `<script>`, `<style>`, `<title>`, `<template>`, `<noscript>`, and `<textarea>`. A match cannot cross a tag.
+- A visible text run is the text between two tags. Text inside tags (so attribute values), comments, and the contents of `<script>`, `<style>`, `<title>`, `<template>`, `<noscript>`, and `<textarea>` is not visible text.
+- The whole trimmed run must equal `oldText`. A match inside a longer run does not count, because the overlay sends an element's whole trimmed `textContent`. Text that crosses a tag, such as `$<span>12</span>/mo`, never matches.
+- Trimming removes leading and trailing whitespace as JavaScript's `String.prototype.trim` does, which includes no-break spaces.
 - Decoding makes visible text compare like the DOM's `textContent`. Decimal (`&#8594;`) and hexadecimal (`&#x2192;`) references are decoded; 0, surrogates, and values above U+10FFFF become U+FFFD. These named references are decoded: `amp lt gt quot apos nbsp mdash ndash hellip rarr larr uarr darr copy reg trade middot bull rsquo lsquo rdquo ldquo times deg euro pound`. A reference needs its `;`. Other named references stay literal text. CRLF and CR become LF. No other whitespace changes.
 - `<script>` content is checked both as written and decoded, because a script can insert either form as HTML.
-- The server replaces the exact source text of the match, including any references in it, with `newText`. It writes `&`, `<`, and `>` in `newText` as `&amp;`, `&lt;`, and `&gt;`.
+- The server replaces the exact source text of the trimmed run, including any references in it, with `newText`. Whitespace around it stays as written. It writes `&`, `<`, and `>` in `newText` as `&amp;`, `&lt;`, and `&gt;`.
 
 ## Idle stop
 

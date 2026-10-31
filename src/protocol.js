@@ -66,9 +66,10 @@ export const API_PREFIX = "/__sketchboard/api/";
  * @typedef {{ kind: "circle", board: string, x: number, y: number, w: number, h: number, note: string }} CircleItem
  *
  * `applied: true`: the server replaced oldText in the file. `applied: false`:
- * oldText did not occur exactly once in the file's decoded visible text, or it
- * occurs in <script> content (as written or decoded), so the file is unchanged
- * and the agent must make the change. docs/PROTOCOL.md ("Hybrid edit rule")
+ * not exactly one decoded visible text run, trimmed, equals oldText (a match
+ * inside a longer run does not count), or oldText occurs in <script> content
+ * (as written or decoded), so the file is unchanged and the agent must make
+ * the change. docs/PROTOCOL.md ("Hybrid edit rule")
  * defines the rule.
  * @typedef {{ kind: "edit", board: string, selector: string, oldText: string, newText: string, applied: boolean, note?: string }} EditItem
  *

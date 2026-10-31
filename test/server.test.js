@@ -180,7 +180,7 @@ function trySymlink(target, link, type) {
   }
 }
 
-test("hybrid edit applies only when the old text occurs exactly once", async () => {
+test("hybrid edit applies only when one text run equals the old text", async () => {
   writeIndex("home", ["edit.html", "gone.html"]);
   const file = path.join(dir("home"), "edit.html");
   const source = "<body><h1>Welcome home</h1><p>Buy now</p><p>Buy now</p></body>";
@@ -217,6 +217,32 @@ test("hybrid edit applies only when the old text occurs exactly once", async () 
   assert.equal((await post("/__sketchboard/api/edit", { canvas: "home", board: "gone.html", selector: "", oldText: "a", newText: "b" })).status, 404);
 });
 
+test("hybrid edit matches only a whole trimmed text run", async () => {
+  writeIndex("whole", ["w.html"]);
+  const file = path.join(dir("whole"), "w.html");
+  /**
+   * @param {string} source
+   * @param {string} oldText
+   * @param {string | null} expected The file after the edit, or null if the edit must not apply.
+   */
+  const check = async (source, oldText, expected) => {
+    writeFileSync(file, source);
+    const r = await post("/__sketchboard/api/edit", { canvas: "whole", board: "w.html", selector: "p", oldText, newText: "Sale" });
+    assert.equal(r.json().item.applied, expected !== null, source);
+    assert.equal(readFileSync(file, "utf8"), expected ?? source);
+  };
+
+  // A price toggle shows "$120/yr" from a data attribute; the edit must not rewrite another sentence.
+  await check('<p id="price" data-yearly="$120/yr">$12/mo</p><p>Annual plan: $120/yr</p>', "$120/yr", null);
+  // The edited element's text crosses a tag, so only a longer run elsewhere contains it.
+  await check('<p id="price">$<span>12</span>/mo</p><p>Pro is $12/mo, billed yearly.</p>', "$12/mo", null);
+  // Whitespace around the run stays as written.
+  await check("<p>\n  Save\n</p>", "Save", "<p>\n  Sale\n</p>");
+  await check("<p>\r\n  Save\r\n</p>", "Save", "<p>\r\n  Sale\r\n</p>");
+  // Two runs equal to the old text.
+  await check("<p>Save</p><p> Save </p>", "Save", null);
+});
+
 test("hybrid edit counts only visible text", async () => {
   writeIndex("vis", ["v.html"]);
   const file = path.join(dir("vis"), "v.html");
@@ -250,7 +276,7 @@ test("hybrid edit counts only visible text", async () => {
   // A match only in markup does not apply.
   await check('<p data-x="Buy now">Hi</p><!-- Buy now --><Style>/* Buy now */</style>', "Buy now", null);
   // A ">" inside a quoted attribute value stays inside the tag; an apostrophe in text is plain text.
-  await check(`<p title="a > Buy now">Don't Buy now</p>`, "Buy now", `<p title="a > Buy now">Don't Sale</p>`);
+  await check(`<p title="a > Buy now">Don't Buy now</p>`, "Don't Buy now", `<p title="a > Buy now">Sale</p>`);
   await check("<p data-don't>Buy now</p>", "Buy now", "<p data-don't>Sale</p>");
   // Two visible matches still do not apply; a match may not cross a tag.
   await check("<p>Buy now</p><p>Buy now</p>", "Buy now", null);
@@ -318,12 +344,12 @@ test("hybrid edit matches decoded visible text and replaces the original entity 
   };
 
   await check("<p>Fish &amp; Chips</p>", "Fish & Chips", "Fish & Fries", "<p>Fish &amp; Fries</p>");
-  // Only the matched range changes, so an entity next to it stays as written.
-  await check("<p>Fish &amp; Chips</p>", "Chips", "Fries", "<p>Fish &amp; Fries</p>");
+  // Only the trimmed run changes, so whitespace references around it stay as written.
+  await check("<p>&nbsp;Fish &amp; Chips&#10;</p>", "Fish & Chips", "Fries", "<p>&nbsp;Fries&#10;</p>");
   await check("<p>2019&mdash;2024</p>", "2019\u20142024", "2025", "<p>2025</p>");
   await check("<p>Next &#8594; step &#x2192;</p>", "Next \u2192 step \u2192", "Go", "<p>Go</p>");
-  await check("<p>Price:&nbsp;10&nbsp;EUR</p>", "10\u00a0EUR", "12 EUR", "<p>Price:&nbsp;12 EUR</p>");
-  await check("<p>Line one\r\nline two</p>", "one\nline", "1", "<p>Line 1 two</p>");
+  await check("<p>Price:&nbsp;10&nbsp;EUR</p>", "Price:\u00a010\u00a0EUR", "Price: 12 EUR", "<p>Price: 12 EUR</p>");
+  await check("<p>Line one\r\nline two</p>", "Line one\nline two", "1", "<p>1</p>");
   // Upper-case X and hex digits; 0, surrogates, and values past U+10FFFF decode to U+FFFD.
   await check("<p>&#X2192; &#xA9;</p>", "\u2192 \u00a9", "Go", "<p>Go</p>");
   await check("<p>a&#0;b&#xD800;c&#x110000;d</p>", "a\ufffdb\ufffdc\ufffdd", "x", "<p>x</p>");

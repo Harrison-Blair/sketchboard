@@ -422,14 +422,15 @@ async function apiEdit(res, body) {
 const RAW_TEXT_TAGS = new Set(["script", "style", "title", "template", "noscript", "textarea"]);
 
 /**
- * The source range [start, end) of the one occurrence of `needle` in the
- * visible text of `html`, or null if it occurs zero or several times there,
- * or occurs anywhere in <script> content, as written or decoded (a script may
- * render it too).
- * Visible text excludes tags (and so attribute values), comments, and the
- * contents of RAW_TEXT_TAGS. It is compared after decoding character
- * references and turning CRLF and CR into LF, as the DOM's textContent does.
- * A match may not cross a tag.
+ * The source range [start, end) of the one visible text run of `html` that,
+ * trimmed, equals `needle` (the overlay sends an element's trimmed
+ * textContent, so a match inside a longer run is some other text). Null if
+ * zero or several runs equal it, or if `needle` occurs anywhere in <script>
+ * content, as written or decoded (a script may render it too).
+ * A run is the text between two tags, excluding comments and the contents of
+ * RAW_TEXT_TAGS. It is compared after decoding character references and
+ * turning CRLF and CR into LF, as the DOM's textContent does. The range covers
+ * only the trimmed part, so surrounding whitespace stays as written.
  * @param {string} html
  * @param {string} needle
  * @returns {[number, number] | null}
@@ -442,10 +443,10 @@ function editTarget(html, needle) {
   let found = null;
   for (const [start, end] of text) {
     const { decoded, offsets } = decodeText(html, start, end);
-    for (let at = decoded.indexOf(needle); at !== -1; at = decoded.indexOf(needle, at + 1)) {
-      if (found) return null;
-      found = [offsets[at], offsets[at + needle.length]];
-    }
+    if (decoded.trim() !== needle) continue;
+    if (found) return null;
+    const at = decoded.length - decoded.trimStart().length;
+    found = [offsets[at], offsets[at + needle.length]];
   }
   return found;
 }
