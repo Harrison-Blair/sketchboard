@@ -128,9 +128,20 @@ async function wait(root, args) {
 async function locate(root, args) {
   const [canvas, file] = positionals(args, 2);
   checkCanvas(canvas);
-  const saved = JSON.parse(readFileSync(file, "utf8"));
+  const bytes = readFileSync(file);
+  // Windows PowerShell 5.1 redirection writes UTF-16LE with a BOM.
+  const text = bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.toString("utf16le") : bytes.toString("utf8");
+  let saved;
+  try {
+    saved = JSON.parse(text.replace(/^\ufeff/, ""));
+  } catch (err) {
+    throw new Error(`${file} is not JSON: ${/** @type {Error} */ (err).message}`);
+  }
   const items = Array.isArray(saved) ? saved : saved?.items;
   if (!Array.isArray(items)) throw new Error(`${file} holds neither wait output with "items" nor an items array`);
+  if (typeof saved?.canvas === "string" && saved.canvas !== canvas) {
+    throw new Error(`${file} is wait output for canvas "${saved.canvas}", not "${canvas}"`);
+  }
   const server = await ensureServer(root);
   process.stdout.write(JSON.stringify(ok(await api(server.port, "POST", "locate", { canvas, items }))) + "\n");
 }

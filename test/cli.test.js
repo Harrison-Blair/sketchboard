@@ -233,6 +233,21 @@ test("locate reads saved wait output or its items and prints positions as wait d
     writeFileSync(saved, JSON.stringify(JSON.parse(waited.stdout).items));
     assert.equal((await cli(root, ["locate", "home", saved])).stdout, expected);
 
+    // Windows PowerShell redirection writes UTF-16LE with a BOM; Out-File -Encoding utf8 writes a UTF-8 BOM.
+    writeFileSync(saved, Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(waited.stdout, "utf16le")]));
+    assert.equal((await cli(root, ["locate", "home", saved])).stdout, expected);
+    writeFileSync(saved, "\ufeff" + waited.stdout);
+    assert.equal((await cli(root, ["locate", "home", saved])).stdout, expected);
+
+    writeFileSync(saved, "not json");
+    const notJson = await cli(root, ["locate", "home", saved]);
+    assert.equal(notJson.code, 1);
+    assert.match(notJson.stderr, new RegExp(`${saved.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")} is not JSON: `));
+    writeFileSync(saved, waited.stdout);
+    const other = await cli(root, ["locate", "other", saved]);
+    assert.equal(other.code, 1);
+    assert.match(other.stderr, /is wait output for canvas "home", not "other"/);
+
     writeFileSync(saved, "{}");
     const bad = await cli(root, ["locate", "home", saved]);
     assert.notEqual(bad.code, 0);
