@@ -407,7 +407,13 @@ function positioned(item) {
 function locate(canvas, item) {
   if (!positioned(item)) return item;
   const file = boardNameError(item.board) ? null : rootFile(root, [canvas, item.board]);
-  const bytes = file ? readFileSync(file) : null;
+  /** @type {Buffer | null} */
+  let bytes = null;
+  try {
+    bytes = file ? readFileSync(file) : null;
+  } catch {
+    // Unreadable now (permissions, a sharing lock, or deleted since rootFile checked).
+  }
   if (!file || !bytes || !samePositions(file, bytes, item.ver)) return { ...item, fileChanged: true };
   const html = bytes.toString("utf8");
   const tag = regions(html).tags[item.src];
@@ -788,8 +794,10 @@ function removeWaiter(w) {
 function take(canvas) {
   for (const [name, items] of held) {
     if (items.length > 0 && (canvas === null || canvas === name)) {
+      // Resolve first, so an error cannot drop the held items.
+      const ready = { canvas: name, items: items.map((item) => locate(name, item)) };
       held.delete(name);
-      return { canvas: name, items: items.map((item) => locate(name, item)) };
+      return ready;
     }
   }
   return null;

@@ -1,7 +1,7 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { cleanup, cli, http, makeHome, openEvents, readState, until } from "./helpers.js";
 
@@ -309,6 +309,32 @@ test("positions are resolved when wait delivers the items, not at send", async (
   await post("/__sketchboard/api/send", { canvas: "late", items: [item] });
   rmSync(file);
   assert.deepEqual((await get("/__sketchboard/api/wait?canvas=late&timeout=1")).json().items, [{ ...item, fileChanged: true }]);
+});
+
+test("an unreadable board file gives fileChanged and keeps the held batch", async (t) => {
+  if (process.platform === "win32") return t.skip("chmod does not block reads on Windows");
+  if (process.getuid?.() === 0) return t.skip("root can read any file");
+  writeIndex("locked", ["l.html"]);
+  const file = path.join(dir("locked"), "l.html");
+  writeFileSync(file, "<p>Locked</p>");
+  const ver = servedVer((await get("/design/locked/l.html")).text);
+  const item = { kind: "edit", board: "l.html", selector: "p", oldText: "Locked", newText: "Open", applied: false, src: 0, ver };
+  await post("/__sketchboard/api/send", { canvas: "locked", items: [item], message: "keep this" });
+  chmodSync(file, 0o000);
+  try {
+    const r = await get("/__sketchboard/api/wait?canvas=locked&timeout=1");
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.json().items, [{ ...item, fileChanged: true }, { kind: "message", text: "keep this" }]);
+
+    // The same when a pending wait gets the batch right at send.
+    const pending = get("/__sketchboard/api/wait?canvas=locked&timeout=5");
+    await until(async () => (await get("/__sketchboard/api/status")).json().waiting === 1);
+    const sent = await post("/__sketchboard/api/send", { canvas: "locked", items: [item] });
+    assert.equal(sent.status, 200);
+    assert.deepEqual((await pending).json().items, [{ ...item, fileChanged: true }]);
+  } finally {
+    chmodSync(file, 0o644);
+  }
 });
 
 test("positions follow a board symlink retargeted between send and wait", async (t) => {
