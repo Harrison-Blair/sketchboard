@@ -74,7 +74,12 @@ export const API_PREFIX = "/__sketchboard/api/";
  * `newHtml`: only when applied is false, if the browser has it. The element's
  * inner HTML as the user left it in the live page: raw, not escaped, without
  * the element's own tag and attributes. The server never writes it to a file.
- * @typedef {{ kind: "edit", board: string, selector: string, oldText: string, newText: string, applied: boolean, newHtml?: string, note?: string }} EditItem
+ * `src`, `ver`: from the EditRequest. `send` adds the rest when `ver` is
+ * given and `src` is a number: `line` (1-based) and `tag` (the start tag as
+ * in the file, cut to 200 characters) of element `src`, and `inTemplate` if it
+ * is inside a <template>, when the file still has hash `ver`; otherwise
+ * `fileChanged`. docs/PROTOCOL.md ("Source positions") defines them.
+ * @typedef {{ kind: "edit", board: string, selector: string, oldText: string, newText: string, applied: boolean, newHtml?: string, src?: number | null, ver?: string, line?: number, tag?: string, inTemplate?: true, fileChanged?: true, note?: string }} EditItem
  *
  * @typedef {{ kind: "pick", compare: string, board: string, note?: string }} PickItem
  *
@@ -131,7 +136,9 @@ export const API_PREFIX = "/__sketchboard/api/";
  * @typedef {{ canvas: string, items: FeedbackItem[], message?: string }} SendRequest
  * @typedef {{ held: number }} SendResponse
  *
- * @typedef {{ canvas: string, board: string, selector: string, oldText: string, newText: string }} EditRequest
+ * `src`: the edited element's data-sb-src ordinal, or null if it has none (a
+ * script created it). `ver`: the page's data-sb-ver.
+ * @typedef {{ canvas: string, board: string, selector: string, oldText: string, newText: string, src?: number | null, ver?: string }} EditRequest
  * The browser adds `item` to its Unsent queue. It reaches `wait` on Send.
  * @typedef {{ item: EditItem }} EditResponse
  *

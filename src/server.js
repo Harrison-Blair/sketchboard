@@ -1,5 +1,6 @@
 // Server entry point. The CLI spawns `node src/server.js <root>` as a
 // detached process. SKETCHBOARD_IDLE_MS overrides the idle timeout (tests only).
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, watch, writeFileSync } from "node:fs";
 import { readFile, realpath } from "node:fs/promises";
@@ -32,7 +33,8 @@ import { boardNameError, canvasNameError, ensureStateDir, indexFile, insideRoot,
 
 const PROTOCOL_FILE = fileURLToPath(new URL("./protocol.js", import.meta.url));
 const UI_DIR = fileURLToPath(new URL("../ui/", import.meta.url));
-const OVERLAY_TAG = `<script type="module" src="${TOOL_PREFIX}overlay.js"></script>`;
+/** @param {string} ver contentHash of the served file */
+const overlayTag = (ver) => `<script type="module" src="${TOOL_PREFIX}overlay.js" data-sb-ver="${ver}"></script>`;
 const MAX_BODY = 10 * 1024 * 1024;
 const DEBOUNCE_MS = 75;
 
@@ -372,13 +374,14 @@ function apiEvents(req, res, query) {
  * @param {Res} res
  * @param {any} body
  */
-function apiSend(res, body) {
+async function apiSend(res, body) {
   const canvas = body?.canvas;
   const err = canvasNameError(canvas);
   if (err) return sendJson(res, 400, { error: err });
   if (!Array.isArray(body.items)) return sendJson(res, 400, { error: "items must be an array" });
+  const items = await Promise.all(body.items.map((/** @type {FeedbackItem} */ item) => locate(canvas, item)));
   const list = held.get(canvas) ?? [];
-  list.push(...body.items);
+  list.push(...items);
   if (typeof body.message === "string" && body.message.trim() !== "") list.push({ kind: "message", text: body.message });
   held.set(canvas, list);
   const count = list.length;
@@ -387,11 +390,52 @@ function apiSend(res, body) {
 }
 
 /**
+ * Adds where an edit item's element starts in the board file, if the file is
+ * still the one the page was served from.
+ * @param {string} canvas
+ * @param {FeedbackItem} item
+ * @returns {Promise<FeedbackItem>}
+ */
+async function locate(canvas, item) {
+  if (item?.kind !== "edit" || typeof item.ver !== "string" || typeof item.src !== "number") return item;
+  const file = boardNameError(item.board) ? null : await rootFile(root, [canvas, item.board]);
+  const bytes = file && readFileSync(file);
+  if (!bytes || contentHash(bytes) !== item.ver) return { ...item, fileChanged: true };
+  const html = bytes.toString("utf8");
+  const tag = regions(html).tags[item.src];
+  if (!tag) return item;
+  const line = (html.slice(0, tag.start).match(/\r\n?|\n/g)?.length ?? 0) + 1;
+  return { ...item, line, tag: html.slice(tag.start, tag.end).slice(0, 200), ...(tag.inTemplate && { inTemplate: true }) };
+}
+
+/**
+ * Short hash of a board file's bytes. The overlay tag carries it as data-sb-ver.
+ * @param {Buffer} bytes
+ */
+function contentHash(bytes) {
+  return createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+}
+
+/**
+ * Adds data-sb-src="N" to each element start tag, N being its ordinal in regions().tags.
+ * @param {string} html
+ */
+function stampSources(html) {
+  let out = "";
+  let at = 0;
+  regions(html).tags.forEach((tag, n) => {
+    out += html.slice(at, tag.nameEnd) + ` data-sb-src="${n}"`;
+    at = tag.nameEnd;
+  });
+  return out + html.slice(at);
+}
+
+/**
  * @param {Res} res
  * @param {any} body
  */
 async function apiEdit(res, body) {
-  const { canvas, board, selector, oldText, newText } = body ?? {};
+  const { canvas, board, selector, oldText, newText, src, ver } = body ?? {};
   const err = canvasNameError(canvas) ?? boardNameError(board);
   if (err) return sendJson(res, 400, { error: err });
   if (typeof oldText !== "string" || typeof newText !== "string") {
@@ -409,44 +453,51 @@ async function apiEdit(res, body) {
   const file = await rootFile(root, [canvas, board]);
   if (!file) return sendJson(res, 404, { error: `no board file "${canvas}/${board}" inside the root folder` });
   // Read and write in one synchronous step so concurrent edits cannot interleave.
-  const source = readFileSync(file, "utf8");
+  const bytes = readFileSync(file);
+  const source = bytes.toString("utf8");
   const found = oldText === "" ? null : editTarget(source, oldText);
-  const applied = found !== null;
-  if (found) writeFileSync(file, source.slice(0, found[0]) + escapeText(newText) + source.slice(found[1]));
+  // With the position of the element the user edited, the run must be that element's own text.
+  const pinned = typeof src === "number" && typeof ver === "string" && contentHash(bytes) === ver;
+  const applied = found !== null && (!pinned || found.parent === src);
+  if (found && applied) writeFileSync(file, source.slice(0, found.range[0]) + escapeText(newText) + source.slice(found.range[1]));
   /** @type {EditItem} */
   const item = { kind: "edit", board, selector: String(selector ?? ""), oldText, newText, applied };
+  if (src === null || typeof src === "number") item.src = src;
+  if (typeof ver === "string") item.ver = ver;
   sendJson(res, 200, { item });
 }
 
 /** Elements whose contents are not visible page text. */
-const RAW_TEXT_TAGS = new Set(["script", "style", "title", "template", "noscript", "textarea"]);
+const RAW_TEXT_TAGS = new Set(["script", "style", "title", "noscript", "textarea"]);
+const VOID_TAGS = new Set(["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"]);
 
 /**
  * The source range [start, end) of the one visible text run of `html` that,
  * trimmed, equals `needle` (the overlay sends an element's trimmed
  * textContent, so a match inside a longer run is some other text). Null if
  * zero or several runs equal it, or if `needle` occurs anywhere in <script>
- * content, as written or decoded (a script may render it too).
+ * content, as written or decoded (a script may render it too). `parent` is
+ * the ordinal of the element the run is a direct child of.
  * A run is the text between two tags, excluding comments and the contents of
- * RAW_TEXT_TAGS. It is compared after decoding character references and
+ * RAW_TEXT_TAGS and <template>. It is compared after decoding character references and
  * turning CRLF and CR into LF, as the DOM's textContent does. The range covers
  * only the trimmed part, so surrounding whitespace stays as written.
  * @param {string} html
  * @param {string} needle
- * @returns {[number, number] | null}
+ * @returns {{ range: [number, number], parent: number } | null}
  */
 function editTarget(html, needle) {
   const { text, script } = regions(html);
   const inScript = (/** @type {[number, number]} */ [start, end]) => html.slice(start, end).includes(needle) || decodeText(html, start, end).decoded.includes(needle);
   if (script.some(inScript)) return null;
-  /** @type {[number, number] | null} */
+  /** @type {{ range: [number, number], parent: number } | null} */
   let found = null;
-  for (const [start, end] of text) {
+  for (const [start, end, parent] of text) {
     const { decoded, offsets } = decodeText(html, start, end);
     if (decoded.trim() !== needle) continue;
     if (found) return null;
     const at = decoded.length - decoded.trimStart().length;
-    found = [offsets[at], offsets[at + needle.length]];
+    found = { range: [offsets[at], offsets[at + needle.length]], parent };
   }
   return found;
 }
@@ -506,15 +557,31 @@ function codePoint(n) {
 }
 
 /**
- * [start, end) ranges of the text between markup in `html`, and of the
- * contents of each <script> element.
+ * Scans `html` the way the HTML parser splits it, as far as edits and source
+ * positions need.
+ * `tags`: each element start tag, outside comments and RAW_TEXT_TAGS content,
+ * in source order, so the index is the tag's ordinal. <template> content
+ * counts; `inTemplate` marks tags inside it. `nameEnd` is just past the name.
+ * `text`: [start, end, parent] of each run between markup outside <template>,
+ * where parent is the ordinal of the open element (-1 at top level).
+ * `script`: [start, end) of each <script> element's contents.
  * @param {string} html
  */
 function regions(html) {
-  /** @type {[number, number][]} */
+  /** @type {[number, number, number][]} */
   const text = [];
   /** @type {[number, number][]} */
   const script = [];
+  /** @type {{ start: number, nameEnd: number, end: number, inTemplate: boolean }[]} */
+  const tags = [];
+  /** @type {{ name: string, ordinal: number }[]} */
+  const open = [];
+  let templates = 0;
+  const startTag = /<([A-Za-z][^\s/>]*)/y;
+  const endTag = /<\/([A-Za-z][^\s/>]*)/y;
+  const pushText = (/** @type {number} */ end) => {
+    if (end > textStart && templates === 0) text.push([textStart, end, open.at(-1)?.ordinal ?? -1]);
+  };
   let textStart = 0;
   let i = 0;
   while (i < html.length) {
@@ -522,26 +589,39 @@ function regions(html) {
       i++;
       continue;
     }
-    if (i > textStart) text.push([textStart, i]);
+    pushText(i);
+    startTag.lastIndex = endTag.lastIndex = i;
+    const start = startTag.exec(html);
+    const end = start ? null : endTag.exec(html);
     if (html.startsWith("<!--", i)) {
       const close = html.indexOf("-->", i + 4);
       i = close === -1 ? html.length : close + 3;
-    } else {
-      const name = /^<([A-Za-z][^\s/>]*)/.exec(html.slice(i, i + 32))?.[1].toLowerCase();
+    } else if (start) {
+      const name = start[1].toLowerCase();
+      const tagStart = i;
       i = tagEnd(html, i);
-      if (name !== undefined && RAW_TEXT_TAGS.has(name)) {
+      tags.push({ start: tagStart, nameEnd: tagStart + start[0].length, end: i, inTemplate: templates > 0 });
+      if (RAW_TEXT_TAGS.has(name)) {
         const close = new RegExp(`</${name}[\\s/>]`, "ig");
         close.lastIndex = i;
         const m = close.exec(html);
         const contentEnd = m ? m.index : html.length;
         if (name === "script") script.push([i, contentEnd]);
         i = m ? tagEnd(html, m.index) : html.length;
+      } else if (!VOID_TAGS.has(name) && !(html[i - 2] === "/" && open.some((e) => e.name === "svg" || e.name === "math"))) {
+        open.push({ name, ordinal: tags.length - 1 });
+        if (name === "template") templates++;
       }
+    } else {
+      i = tagEnd(html, i);
+      const name = end?.[1].toLowerCase();
+      const at = open.findLastIndex((e) => e.name === name);
+      if (at !== -1) for (const e of open.splice(at)) if (e.name === "template") templates--;
     }
     textStart = i;
   }
-  if (html.length > textStart) text.push([textStart, html.length]);
-  return { text, script };
+  pushText(html.length);
+  return { text, script, tags };
 }
 
 /**
@@ -872,9 +952,10 @@ async function serveFile(res, file, inject) {
   /** @type {string | Buffer} */
   let body = await readFile(file);
   if (inject && type.startsWith("text/html")) {
-    const html = body.toString("utf8");
+    const tag = overlayTag(contentHash(body));
+    const html = stampSources(body.toString("utf8"));
     const at = html.toLowerCase().lastIndexOf("</body>");
-    body = at === -1 ? html + OVERLAY_TAG : html.slice(0, at) + OVERLAY_TAG + html.slice(at);
+    body = at === -1 ? html + tag : html.slice(0, at) + tag + html.slice(at);
   }
   res.writeHead(200, { "Content-Type": type, "Cache-Control": "no-store" });
   res.end(body);

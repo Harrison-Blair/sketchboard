@@ -31,12 +31,27 @@ The server reads a missing `notes`, `compare`, or `order` in `canvas.json` as em
 The server applies an edit only if exactly one visible text run of the board, decoded and trimmed, equals `oldText`, and `oldText` occurs nowhere in `<script>` content. Otherwise it returns `applied: false` and does not change the file.
 
 - A visible text run is the text between two tags. Text inside tags (so attribute values), comments, and the contents of `<script>`, `<style>`, `<title>`, `<template>`, `<noscript>`, and `<textarea>` is not visible text.
+- If the request has a numeric `src` and a `ver` equal to the file's current hash (see Source positions), the run must also be a direct text child of the element with ordinal `src`: not text of another element, and not text of a descendant element. If `ver` differs or `src` is null or missing, only the text rule applies.
 - The whole trimmed run must equal `oldText`. A match inside a longer run does not count, because the overlay sends an element's whole trimmed `textContent`. Text that crosses a tag, such as `$<span>12</span>/mo`, never matches.
 - Trimming removes leading and trailing whitespace as JavaScript's `String.prototype.trim` does, which includes no-break spaces.
 - Decoding makes visible text compare like the DOM's `textContent`. Decimal (`&#8594;`) and hexadecimal (`&#x2192;`) references are decoded; 0, surrogates, and values above U+10FFFF become U+FFFD. These named references are decoded: `amp lt gt quot apos nbsp mdash ndash hellip rarr larr uarr darr copy reg trade middot bull rsquo lsquo rdquo ldquo times deg euro pound`. A reference needs its `;`. Other named references stay literal text. CRLF and CR become LF. No other whitespace changes.
 - `<script>` content is checked both as written and decoded, because a script can insert either form as HTML.
 - The server replaces the exact source text of the trimmed run, including any references in it, with `newText`. Whitespace around it stays as written. It writes `&`, `<`, and `>` in `newText` as `&amp;`, `&lt;`, and `&gt;`.
 - An `edit` item with `applied: false` can carry an optional `newHtml`: the edited element's inner HTML as the user left it in the live page. It is raw HTML, not escaped, and does not include the element's own tag and attributes. The browser fills it; `send` holds it and `wait` returns it unchanged. The server never writes it to a file. An applied edit has no `newHtml`.
+
+## Source positions
+
+When the server serves a board HTML page with the overlay (not with `?raw=1`), it adds attributes to the page. It never writes them to a file.
+
+- `data-sb-src="N"` on every element start tag. N is the 0-based ordinal of that start tag in the file, in source order. The count includes every element start tag (also `<script>`, `<style>`, `<title>`, `<textarea>`, `<noscript>`, void and self-closing tags, and SVG children) and the tags inside `<template>` content. It excludes tags in comments and in the raw-text contents of `<script>`, `<style>`, `<title>`, `<textarea>`, and `<noscript>`. A `>` inside a quoted attribute value does not end a tag. Elements that a script creates have no `data-sb-src`; a clone copies the attribute of its source.
+- `data-sb-ver="<hash>"` on the injected overlay `<script>` tag. The hash is the first 16 hexadecimal characters of the SHA-256 of the file's exact bytes.
+
+The browser sends the edited element's ordinal as `src` (null if it has no `data-sb-src`) and the page's hash as `ver` in an `EditRequest`. The returned `edit` item keeps both. `send` adds fields to each `edit` item that has a `ver` and a numeric `src`:
+
+- If the board file's current hash equals `ver`: `line`, the 1-based line where start tag `src` begins (CRLF, CR, and LF each end a line); `tag`, that start tag exactly as in the file, cut to 200 characters; and `inTemplate: true` if the element is inside a `<template>`.
+- If the hash differs, or the file is gone: `fileChanged: true`, and no `line` or `tag`.
+
+`send` adds nothing to items with `src: null` or without `ver`, and keeps every other field unchanged.
 
 ## Idle stop
 

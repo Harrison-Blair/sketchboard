@@ -1,10 +1,13 @@
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { cleanup, cli, http, makeHome, openEvents, readState, until } from "./helpers.js";
 
-const OVERLAY = '<script type="module" src="/__sketchboard/overlay.js"></script>';
+/** @param {string} source The board file the page was served from. */
+const overlay = (source) =>
+  `<script type="module" src="/__sketchboard/overlay.js" data-sb-ver="${createHash("sha256").update(source).digest("hex").slice(0, 16)}"></script>`;
 const root = makeHome();
 let port = 0;
 /** @param {string} canvas */
@@ -67,8 +70,8 @@ test("serves root files under /design/ with content types and injects the overla
   const a = await get("/design/home/a.html");
   assert.equal(a.status, 200);
   assert.match(String(a.headers["content-type"]), /^text\/html/);
-  assert.equal(a.text, `<html><body><h1>A</h1>${OVERLAY}</body></html>`);
-  assert.equal((await get("/design/home/frag.html")).text, `<h1>no body tag</h1>${OVERLAY}`);
+  assert.equal(a.text, `<html data-sb-src="0"><body data-sb-src="1"><h1 data-sb-src="2">A</h1>${overlay("<html><body><h1>A</h1></body></html>")}</body></html>`);
+  assert.equal((await get("/design/home/frag.html")).text, `<h1 data-sb-src="0">no body tag</h1>${overlay("<h1>no body tag</h1>")}`);
   assert.equal((await get("/design/home/a.html?raw=1")).text, "<html><body><h1>A</h1></body></html>");
 
   const css = await get("/design/systems/base/tokens.css");
@@ -180,6 +183,119 @@ function trySymlink(target, link, type) {
   }
 }
 
+test("serving stamps each element start tag with its source ordinal", async () => {
+  const long = "custom-element-with-a-really-long-name-here";
+  const source = `<!doctype html>
+<HTML><head><title>T <b>x</b></title><style>p > a { }</style></head>
+<body>
+<!-- x > <p>no</p> -->
+<p title="a > b" class=x>One</p><br/><IMG src="i.png">
+<template><li>Row</li></template>
+<script>const s = "<div>";</script>
+<svg viewBox="0 0 1 1"><circle r="1"/><g></g></svg>
+<textarea><p>raw</p></textarea>
+<${long}>c</${long}>
+</body></HTML>`;
+  writeFileSync(path.join(dir("home"), "stamp.html"), source);
+  const served = await get("/design/home/stamp.html");
+  assert.equal(served.text, `<!doctype html>
+<HTML data-sb-src="0"><head data-sb-src="1"><title data-sb-src="2">T <b>x</b></title><style data-sb-src="3">p > a { }</style></head>
+<body data-sb-src="4">
+<!-- x > <p>no</p> -->
+<p data-sb-src="5" title="a > b" class=x>One</p><br data-sb-src="6"/><IMG data-sb-src="7" src="i.png">
+<template data-sb-src="8"><li data-sb-src="9">Row</li></template>
+<script data-sb-src="10">const s = "<div>";</script>
+<svg data-sb-src="11" viewBox="0 0 1 1"><circle data-sb-src="12" r="1"/><g data-sb-src="13"></g></svg>
+<textarea data-sb-src="14"><p>raw</p></textarea>
+<${long} data-sb-src="15">c</${long}>
+${overlay(source)}</body></HTML>`);
+  assert.equal((await get("/design/home/stamp.html?raw=1")).text, source);
+  assert.equal(readFileSync(path.join(dir("home"), "stamp.html"), "utf8"), source);
+});
+
+/** @param {string} served A page served under /design/. */
+const servedVer = (served) => /data-sb-ver="([^"]+)"/.exec(served)?.[1];
+
+test("send adds the source position of an edit item's element", async () => {
+  writeIndex("srcs", ["s.html"]);
+  const long = "y".repeat(300);
+  const source = [
+    "<html>",
+    "<body>",
+    '<template><p class="row">Row</p></template>',
+    "<ul>",
+    '  <li class="a">First</li>',
+    "</ul>",
+    `<div title="${long}">D</div>`,
+    "</body>",
+    "</html>",
+  ].join("\r\n").replace("\r\n", "\r");
+  const file = path.join(dir("srcs"), "s.html");
+  writeFileSync(file, source);
+  const ver = servedVer((await get("/design/srcs/s.html")).text);
+  assert.ok(ver, "the served page carries data-sb-ver");
+  const base = { kind: "edit", board: "s.html", selector: "li", oldText: "First", newText: "1st", applied: false };
+  const items = [
+    { ...base, src: 5, ver },
+    { ...base, src: 3, ver },
+    { ...base, src: 6, ver },
+    { ...base, src: 5, ver: "0000000000000000" },
+    { ...base, src: null, ver },
+    { ...base, src: null, ver: "0000000000000000" },
+    { ...base, board: "gone.html", src: 5, ver },
+    { ...base, src: 99, ver },
+    { kind: "pin", board: "s.html", x: 1, y: 2, selector: "li", tag: "li", text: "First", note: "n" },
+  ];
+  await post("/__sketchboard/api/send", { canvas: "srcs", items });
+  const got = (await get("/__sketchboard/api/wait?canvas=srcs&timeout=1")).json();
+  assert.deepEqual(got.items, [
+    { ...items[0], line: 5, tag: '<li class="a">' },
+    { ...items[1], line: 3, tag: '<p class="row">', inTemplate: true },
+    { ...items[2], line: 7, tag: `<div title="${long}">`.slice(0, 200) },
+    { ...items[3], fileChanged: true },
+    items[4],
+    items[5],
+    { ...items[6], fileChanged: true },
+    items[7],
+    items[8],
+  ]);
+  assert.equal(readFileSync(file, "utf8"), source);
+});
+
+test("hybrid edit with a source position applies only to a direct text child of that element", async () => {
+  writeIndex("pos", ["p.html"]);
+  const file = path.join(dir("pos"), "p.html");
+  /**
+   * @param {string} source
+   * @param {number | null} src
+   * @param {boolean} sameVer Send the hash of the served page, or a stale one.
+   * @param {string | null} expected The file after the edit, or null if the edit must not apply.
+   */
+  const check = async (source, src, sameVer, expected) => {
+    writeFileSync(file, source);
+    const ver = sameVer ? servedVer((await get("/design/pos/p.html")).text) : "0000000000000000";
+    const r = await post("/__sketchboard/api/edit", { canvas: "pos", board: "p.html", selector: "li", oldText: "Alpha", newText: "Sale", src, ver });
+    assert.deepEqual(r.json().item, { kind: "edit", board: "p.html", selector: "li", oldText: "Alpha", newText: "Sale", applied: expected !== null, src, ver });
+    assert.equal(readFileSync(file, "utf8"), expected ?? source, `src ${src}`);
+  };
+
+  const rows = "<ul><li>Alpha</li><li>Beta</li></ul>";
+  // A script moved rows, so the edited element (ordinal 2) is not the one whose source text matches.
+  await check(rows, 2, true, null);
+  await check(rows, 1, true, "<ul><li>Sale</li><li>Beta</li></ul>");
+  // The run must be the element's own text, not a descendant's.
+  await check("<ul><li><b>Alpha</b></li></ul>", 1, true, null);
+  await check("<ul><li><b>Alpha</b></li></ul>", 2, true, "<ul><li><b>Sale</b></li></ul>");
+  // End tags close their element; void tags and "/>" inside SVG open none; "/>" on an HTML element does.
+  await check("<ul><li><b>x</b>Alpha</li></ul>", 1, true, "<ul><li><b>x</b>Sale</li></ul>");
+  await check("<ul><li>x<br>Alpha</li></ul>", 1, true, "<ul><li>x<br>Sale</li></ul>");
+  await check("<svg><text><tspan/>Alpha</text></svg>", 1, true, "<svg><text><tspan/>Sale</text></svg>");
+  await check("<ul><li><div/>Alpha</li></ul>", 1, true, null);
+  // Without a usable position, the text rule alone decides.
+  await check(rows, 2, false, "<ul><li>Sale</li><li>Beta</li></ul>");
+  await check(rows, null, true, "<ul><li>Sale</li><li>Beta</li></ul>");
+});
+
 test("hybrid edit applies only when one text run equals the old text", async () => {
   writeIndex("home", ["edit.html", "gone.html"]);
   const file = path.join(dir("home"), "edit.html");
@@ -290,6 +406,7 @@ test("hybrid edit counts only visible text", async () => {
   // An unterminated comment or raw-text element runs to the end of the file.
   await check("<p>Buy now</p><!-- Buy now", "Buy now", "<p>Sale</p><!-- Buy now");
   await check("<p>Buy now</p><style>/* Buy now", "Buy now", "<p>Sale</p><style>/* Buy now");
+  await check("<p>Buy now</p><textarea>Buy now", "Buy now", "<p>Sale</p><textarea>Buy now");
   await check('<p>Buy now</p><script>go("Buy now")', "Buy now", null);
   // The parser ignores "/>" on <textarea>, so its contents are still raw text.
   await check("<textarea/>Buy now</textarea><p>Buy now</p>", "Buy now", "<textarea/>Buy now</textarea><p>Sale</p>");
