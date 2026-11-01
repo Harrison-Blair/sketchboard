@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>sketchboard</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/__sketchboard/shell.css">
+<script type="module" src="/__sketchboard/shell.js"></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">sketchboard</a>
+  <h1 class="canvas-title" id="canvas-title"></h1>
+  <span class="conn" id="conn">Connecting</span>
+</header>
+<div class="banner" id="banner" role="alert" hidden></div>
+
+<main class="home" id="home" hidden>
+  <h2>Canvases</h2>
+  <ul class="canvas-list" id="canvas-list"></ul>
+  <p id="home-empty" hidden>No canvases yet. Run <code>sketchboard open &lt;canvas&gt;</code>.</p>
+</main>
+
+<div class="app" id="app" hidden>
+  <a class="skip" id="skip" href="#message">Skip to feedback</a>
+  <main class="work">
+    <div class="toolbar">
+      <div class="group" role="group" aria-label="Pointing tools">
+        <button type="button" class="tool" data-mode="none" aria-pressed="true">Interact</button>
+        <button type="button" class="tool" data-mode="element" aria-pressed="false">Element</button>
+        <button type="button" class="tool" data-mode="text" aria-pressed="false">Text</button>
+        <button type="button" class="tool" data-mode="pin" aria-pressed="false">Pin</button>
+        <button type="button" class="tool" data-mode="circle" aria-pressed="false">Circle</button>
+        <button type="button" class="tool" data-mode="edit" aria-pressed="false">Edit text</button>
+      </div>
+      <div class="group" role="group" aria-label="Notes">
+        <button type="button" id="add-sticky">Add sticky</button>
+        <button type="button" id="add-title">Add title</button>
+      </div>
+      <div class="group" role="group" aria-label="Zoom">
+        <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+        <output id="zoom-level" aria-live="polite">100%</output>
+        <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+        <button type="button" id="fit-all">Fit all</button>
+      </div>
+    </div>
+    <p class="hint" id="hint" aria-live="polite"></p>
+    <div class="viewport" id="viewport" tabindex="0" aria-label="Canvas. Drag, or hold Space and drag, to pan. Arrow keys pan. Ctrl and wheel, or plus and minus, zoom.">
+      <div class="world" id="world"></div>
+      <div class="shield" id="shield"></div>
+      <p class="empty" id="empty" hidden>No boards yet. Your agent adds board files and lists them in <code>canvas.json</code>.</p>
+      <form class="note-pop" id="note-pop" hidden>
+        <label for="note-text" id="note-label">Note</label>
+        <textarea id="note-text" rows="3" placeholder="What should change?"></textarea>
+        <div class="row">
+          <button type="submit" class="primary">Add to Unsent</button>
+          <button type="button" id="note-cancel">Cancel</button>
+        </div>
+      </form>
+    </div>
+    <section class="compare-view" id="compare-view" aria-labelledby="compare-title" hidden>
+      <div class="compare-head">
+        <h2 id="compare-title"></h2>
+        <button type="button" id="compare-close">Close compare</button>
+      </div>
+      <div class="compare-frames" id="compare-frames"></div>
+      <div class="compare-choices" id="compare-choices"></div>
+    </section>
+  </main>
+
+  <aside class="side" aria-label="Feedback">
+    <section class="sect" id="compare-sect" hidden>
+      <h2 class="label">Compare</h2>
+      <ul class="compare-list" id="compare-list"></ul>
+    </section>
+    <section class="sect grow" aria-labelledby="unsent-label">
+      <h2 class="label" id="unsent-label">Unsent (0)</h2>
+      <p class="muted" id="unsent-empty">Use a pointing tool to add notes.</p>
+      <ol class="unsent-list" id="unsent-list"></ol>
+    </section>
+    <form class="sect" id="composer">
+      <label class="label" for="message">Message to agent</label>
+      <textarea id="message" rows="4"></textarea>
+      <button type="submit" class="primary" id="send">Send to agent</button>
+      <p class="send-status" id="send-status" role="status"></p>
+    </form>
+  </aside>
+</div>
+</body>
+</html>
