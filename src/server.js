@@ -893,9 +893,11 @@ const systemChanged = () => debounce("system", () => broadcast({ type: "system" 
  */
 function watchSystems() {
   if (!watchers.has("root")) {
-    addWatcher("root", root, (file) => {
+    addWatcher("root", root, (file, event) => {
+      if (event !== "rename") return;
       if (file === SYSTEM_DIR) {
         closeWatcher("systems");
+        for (const key of watchers.keys()) if (key.startsWith("system:")) closeWatcher(key);
         watchSystems();
         systemChanged();
       } else if (new Set(streams.values()).has(file)) {
@@ -906,9 +908,11 @@ function watchSystems() {
     });
   }
   if (!watchers.has("systems")) {
-    addWatcher("systems", systemsDir, (name) => {
-      closeWatcher(`system:${name}`);
-      watchSystem(name);
+    addWatcher("systems", systemsDir, (name, event) => {
+      if (event === "rename") {
+        closeWatcher(`system:${name}`);
+        watchSystem(name);
+      }
       systemChanged();
     });
   }
@@ -948,13 +952,13 @@ function isDir(p) {
 /**
  * @param {string} key
  * @param {string} dir
- * @param {(file: string) => void} onFile
+ * @param {(file: string, event: string) => void} onFile
  */
 function addWatcher(key, dir, onFile) {
   let w;
   try {
-    w = watch(dir, (_event, file) => {
-      if (file) onFile(String(file));
+    w = watch(dir, (event, file) => {
+      if (file) onFile(String(file), event);
     });
   } catch {
     return; // The folder does not exist; nothing to watch.

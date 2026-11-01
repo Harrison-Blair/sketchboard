@@ -1,5 +1,9 @@
 import { test, expect, boardHtml, boardFrame, boardFrameHandle, useTool, waitForMode } from "./fixtures.js";
 
+const EDIT_START = process.platform === "darwin" ? "Meta+ArrowUp" : "ControlOrMeta+Home";
+const EDIT_END = process.platform === "darwin" ? "Meta+ArrowDown" : "ControlOrMeta+End";
+const SELECT_TO_END = process.platform === "darwin" ? "Meta+Shift+ArrowDown" : "ControlOrMeta+Shift+End";
+
 const INDEX = {
   v: 1,
   title: "E2E canvas",
@@ -485,7 +489,7 @@ for (const { name, source: before = "One line", element = `<p id="m">${before}</
 
     await copy.locator("#m").click(at ? { position: at } : {});
     await expect(copy.locator("#m")).toHaveAttribute("contenteditable", "plaintext-only");
-    if (end) await page.keyboard.press("ControlOrMeta+End");
+    if (end) await page.keyboard.press(EDIT_END);
     if (caret !== undefined) {
       await page.keyboard.press("Home");
       for (let i = 0; i < caret; i++) await page.keyboard.press("ArrowRight");
@@ -769,28 +773,28 @@ async function dropText(page, target, text) {
 // Replaces the source newline after "Click" with "-": a click selects the
 // text, Ctrl+Home goes to its start, and the shifted arrow selects the
 // newline, which shows as one space.
-const SOURCE_DASH = ["ControlOrMeta+Home", ...Array(5).fill("ArrowRight"), "Shift+ArrowRight", { type: "-" }];
+const SOURCE_DASH = [EDIT_START, ...Array(5).fill("ArrowRight"), "Shift+ArrowRight", { type: "-" }];
 const UNTRACKED = [
   { name: "an undo after an ArrowLeft and Backspace", steps: [{ type: "Go" }, { paste: "A\nB" }, "ArrowLeft", "Backspace", "ControlOrMeta+Z"], html: "GoA<br>B" },
   { name: "an undo after select-all and Delete", steps: [{ type: "Go" }, { paste: "A\nB" }, "ControlOrMeta+A", "Delete", "ControlOrMeta+Z"], html: "GoA<br>B" },
   { name: "an undo after two Backspaces", steps: [{ type: "Go" }, { paste: "A\nB" }, "Backspace", "Backspace", "ControlOrMeta+Z"], html: "GoA<br>B" },
-  { name: "a redo in the next edit", steps: ["ControlOrMeta+End", { paste: "A\nB" }, "ControlOrMeta+Z", "Escape", "click", "ControlOrMeta+Shift+Z"], html: "Click<br>B" },
+  { name: "a redo in the next edit", steps: [EDIT_END, { paste: "A\nB" }, "ControlOrMeta+Z", "Escape", "click", "ControlOrMeta+Shift+Z"], html: "Click<br>B" },
   // The newline from the file stays a newline.
-  { name: "a redo after a newline in the source", button: "Click\n  here", steps: ["ControlOrMeta+End", { paste: "A\nB" }, "ControlOrMeta+Z", "Escape", "click", "ControlOrMeta+Shift+Z"], html: "Click\n  here<br>B" },
+  { name: "a redo after a newline in the source", button: "Click\n  here", steps: [EDIT_END, { paste: "A\nB" }, "ControlOrMeta+Z", "Escape", "click", "ControlOrMeta+Shift+Z"], html: "Click\n  here<br>B" },
   // A newline from the file that is deleted in the same edit does not make
   // room for an added one.
   { name: "a drop after typing over a wrapped paragraph", element: '<p id="m">Long sentence that\n  continues here.</p>', steps: [{ type: "Short" }, { drop: "L1\nL2" }], html: "ShortL1<br>L2" },
   { name: "a drop after typing over a wrapped button label", button: "Click\n  here", steps: [{ type: "Go" }, { drop: "L1\nL2" }], html: "GoL1<br>L2" },
   // The undo goes back to the text after the paste, when the source newline
   // was already deleted, so the "\n" it brings back is the pasted break.
-  { name: "an undo after the source newline was deleted and a pasted break removed", button: "Click\n  here", steps: ["ControlOrMeta+End", { type: "Q" }, "ControlOrMeta+Home", ...Array(5).fill("ArrowRight"), "Delete", { paste: "\nB" }, "Backspace", "Backspace", "ControlOrMeta+Z"], html: "Click<br>B  hereQ" },
+  { name: "an undo after the source newline was deleted and a pasted break removed", button: "Click\n  here", steps: [EDIT_END, { type: "Q" }, EDIT_START, ...Array(5).fill("ArrowRight"), "Delete", { paste: "\nB" }, "Backspace", "Backspace", "ControlOrMeta+Z"], html: "Click<br>B  hereQ" },
   // The undo removes only the Z. The dropped "\n" was there before it, so it
   // does not take the place of the deleted source newline.
-  { name: "a drop after the source newline was deleted, then an undo of typing", button: "Click\n  here", steps: ["ControlOrMeta+Home", ...Array(5).fill("ArrowRight"), "Delete", { drop: "L1\nL2" }, { type: "Z" }, "ControlOrMeta+Z"], html: "Click  hereL1<br>L2" },
+  { name: "a drop after the source newline was deleted, then an undo of typing", button: "Click\n  here", steps: [EDIT_START, ...Array(5).fill("ArrowRight"), "Delete", { drop: "L1\nL2" }, { type: "Z" }, "ControlOrMeta+Z"], html: "Click  hereL1<br>L2" },
   // The changed part runs from the X to the drop, around the source newline.
-  { name: "a drop after typing before a newline in the source", button: "Click\n  here", steps: ["ControlOrMeta+Home", { type: "X" }, { drop: "L1\nL2" }], html: "XClick\n  hereL1<br>L2" },
-  { name: "an undo, with the source newline replaced", button: "Click\n  here", steps: ["ControlOrMeta+End", { paste: "A\nB" }, "ArrowLeft", "Backspace", "ControlOrMeta+Z", ...SOURCE_DASH], html: "Click-  hereA<br>B" },
-  { name: "a redo, with the source newline replaced", button: "Click\n  here", steps: ["ControlOrMeta+End", { paste: "A\nB" }, "ControlOrMeta+Z", "Escape", "click", "ControlOrMeta+Shift+Z", ...SOURCE_DASH], html: "Click-  here<br>B" },
+  { name: "a drop after typing before a newline in the source", button: "Click\n  here", steps: [EDIT_START, { type: "X" }, { drop: "L1\nL2" }], html: "XClick\n  hereL1<br>L2" },
+  { name: "an undo, with the source newline replaced", button: "Click\n  here", steps: [EDIT_END, { paste: "A\nB" }, "ArrowLeft", "Backspace", "ControlOrMeta+Z", ...SOURCE_DASH], html: "Click-  hereA<br>B" },
+  { name: "a redo, with the source newline replaced", button: "Click\n  here", steps: [EDIT_END, { paste: "A\nB" }, "ControlOrMeta+Z", "Escape", "click", "ControlOrMeta+Shift+Z", ...SOURCE_DASH], html: "Click-  here<br>B" },
 ];
 
 for (const { name, button = "Click", element = `<button id="m">${button}</button>`, steps, html } of /** @type {{ name: string, button?: string, element?: string, steps: Step[], html: string }[]} */ (UNTRACKED)) {
@@ -854,16 +858,16 @@ test("a drop of two lines of text into an edit is queued with a <br>", async ({ 
 // An undo puts a deleted source newline back as a new "\n" character. The
 // edit is then the same as the file, so nothing is queued or written.
 const SOURCE_UNDO = [
-  { name: "a Delete in a button", element: '<button id="m">Click\n  here</button>', keys: ["ControlOrMeta+Home", ...Array(5).fill("ArrowRight"), "Delete", "ControlOrMeta+Z"] },
-  { name: "typing over it in a button", element: '<button id="m">Click\n  here</button>', keys: ["ControlOrMeta+Home", ...Array(5).fill("ArrowRight"), "Shift+ArrowRight", "-", "ControlOrMeta+Z"] },
+  { name: "a Delete in a button", element: '<button id="m">Click\n  here</button>', keys: [EDIT_START, ...Array(5).fill("ArrowRight"), "Delete", "ControlOrMeta+Z"] },
+  { name: "typing over it in a button", element: '<button id="m">Click\n  here</button>', keys: [EDIT_START, ...Array(5).fill("ArrowRight"), "Shift+ArrowRight", "-", "ControlOrMeta+Z"] },
   { name: "typing over the selected paragraph", element: '<p id="m">Long sentence that\n  continues here.</p>', keys: ["X", "ControlOrMeta+Z"] },
-  { name: "a Backspace in a paragraph", element: '<p id="m">Long sentence that\n  continues here.</p>', keys: ["ControlOrMeta+Home", ...Array(19).fill("ArrowRight"), "Backspace", "ControlOrMeta+Z"] },
-  { name: "typing over the selected paragraph, then typing at the end", element: '<p id="m">Long sentence that\n  continues here.</p>', keys: ["X", "ControlOrMeta+Z", "ControlOrMeta+End", "Y"], file: '<p id="m">Long sentence that\n  continues here.Y</p>' },
+  { name: "a Backspace in a paragraph", element: '<p id="m">Long sentence that\n  continues here.</p>', keys: [EDIT_START, ...Array(19).fill("ArrowRight"), "Backspace", "ControlOrMeta+Z"] },
+  { name: "typing over the selected paragraph, then typing at the end", element: '<p id="m">Long sentence that\n  continues here.</p>', keys: ["X", "ControlOrMeta+Z", EDIT_END, "Y"], file: '<p id="m">Long sentence that\n  continues here.Y</p>' },
   // Typing before the undo means the text is not back as it was at the start.
-  { name: "typing over the paragraph after typing at its end", element: '<p id="m">Long sentence that\n  continues here.</p>', keys: ["ControlOrMeta+End", "Y", "ControlOrMeta+A", "X", "ControlOrMeta+Z"], file: '<p id="m">Long sentence that\n  continues here.Y</p>' },
-  { name: "typing over the start of a button after typing at its end", element: '<button id="m">Click\n  here</button>', keys: ["ControlOrMeta+End", "Q", "ControlOrMeta+Home", ...Array(6).fill("Shift+ArrowRight"), "G", "o", "ControlOrMeta+Z"], file: '<button id="m">Click\n  hereQ</button>' },
-  { name: "typing over two source newlines after typing at the end", element: '<p id="m">Long sentence that\n  continues here\n  and more.</p>', keys: ["ControlOrMeta+End", "Y", "ControlOrMeta+Home", ...Array(18).fill("ArrowRight"), ...Array(18).fill("Shift+ArrowRight"), "-", "ControlOrMeta+Z"], file: '<p id="m">Long sentence that\n  continues here\n  and more.Y</p>' },
-  { name: "typing over two newlines in a row after typing at the end", element: '<p id="m">ab\n\ncd</p>', keys: ["ControlOrMeta+End", "Y", "ControlOrMeta+A", "X", "ControlOrMeta+Z"], file: '<p id="m">ab\n\ncdY</p>' },
+  { name: "typing over the paragraph after typing at its end", element: '<p id="m">Long sentence that\n  continues here.</p>', keys: [EDIT_END, "Y", "ControlOrMeta+A", "X", "ControlOrMeta+Z"], file: '<p id="m">Long sentence that\n  continues here.Y</p>' },
+  { name: "typing over the start of a button after typing at its end", element: '<button id="m">Click\n  here</button>', keys: [EDIT_END, "Q", EDIT_START, ...Array(6).fill("Shift+ArrowRight"), "G", "o", "ControlOrMeta+Z"], file: '<button id="m">Click\n  hereQ</button>' },
+  { name: "typing over two source newlines after typing at the end", element: '<p id="m">Long sentence that\n  continues here\n  and more.</p>', keys: [EDIT_END, "Y", EDIT_START, ...Array(18).fill("ArrowRight"), ...Array(18).fill("Shift+ArrowRight"), "-", "ControlOrMeta+Z"], file: '<p id="m">Long sentence that\n  continues here\n  and more.Y</p>' },
+  { name: "typing over two newlines in a row after typing at the end", element: '<p id="m">ab\n\ncd</p>', keys: [EDIT_END, "Y", "ControlOrMeta+A", "X", "ControlOrMeta+Z"], file: '<p id="m">ab\n\ncdY</p>' },
 ];
 
 for (const { name, element, keys, file } of /** @type {{ name: string, element: string, keys: string[], file?: string }[]} */ (SOURCE_UNDO)) {
@@ -888,7 +892,7 @@ for (const { name, element, keys, file } of /** @type {{ name: string, element: 
     } else {
       // Another edit after it shows that the first one has reached the shell.
       await copy.locator("#m").click();
-      await page.keyboard.press("ControlOrMeta+End");
+      await page.keyboard.press(EDIT_END);
       await page.keyboard.type("Z");
       await page.keyboard.press("Enter");
       await expect(page.locator(".unsent-item")).toHaveCount(1);
@@ -907,9 +911,9 @@ test("full undo after cutting and pasting a cell newline queues nothing", async 
   const copy = boardFrame(page, "c.html");
   await useTool(page, "edit", ["c.html"]);
   await copy.locator("#m").click();
-  await page.keyboard.press("ControlOrMeta+Home");
+  await page.keyboard.press(EDIT_START);
   for (let i = 0; i < 5; i++) await page.keyboard.press("ArrowRight");
-  await page.keyboard.press("ControlOrMeta+Shift+End");
+  await page.keyboard.press(SELECT_TO_END);
   await page.keyboard.press("ControlOrMeta+X");
   await page.keyboard.press("ControlOrMeta+V");
   await page.keyboard.press("ControlOrMeta+Z");
@@ -918,7 +922,7 @@ test("full undo after cutting and pasting a cell newline queues nothing", async 
   await page.keyboard.press("Enter");
   await expect(copy.locator("#m")).not.toHaveAttribute("contenteditable");
   await copy.locator("#m").click();
-  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.press(EDIT_END);
   await page.keyboard.type("Z");
   await page.keyboard.press("Enter");
   await expect(page.locator(".unsent-item")).toHaveCount(1);
