@@ -218,12 +218,21 @@ test("an edit that keeps inline markup is queued with the content the page shows
   await expect(copy.locator("#hero")).toBeVisible();
   await useTool(page, "edit", ["c.html"]);
 
-  // Edit the paragraph, then replace only the link's word.
+  // Edit the paragraph, then replace part of the link's word.
   await copy.locator("#link").click({ position: { x: 4, y: 6 } });
-  await copy.locator("#link a").dblclick();
-  await page.keyboard.type("manual");
+  await copy.locator("#link a").evaluate((link) => {
+    const text = link.firstChild;
+    if (!text) throw new Error("link text is missing");
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 4);
+    const selection = link.ownerDocument.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  });
+  await page.keyboard.type("rout");
   await page.keyboard.press("Enter");
-  await expect(page.locator(".unsent-item").filter({ hasText: "Read the manual first." }).locator(".status")).toHaveText("Not applied: queued for the agent");
+  await expect(page.locator(".unsent-item").filter({ hasText: "Read the route first." }).locator(".status")).toHaveText("Not applied: queued for the agent");
 
   // Replace the whole heading, line break included.
   await copy.locator("#hero").click();
@@ -235,9 +244,9 @@ test("an edit that keeps inline markup is queued with the content the page shows
   expect(link.newHtml).not.toContain("data-sb");
   expect(hero.newHtml).not.toContain("data-sb");
   console.log("newHtml seen:", JSON.stringify([link.newHtml, hero.newHtml]));
-  expect(await parse(page, link.newHtml)).toEqual({ text: "Read the manual first.", links: [{ href: "/g", text: expect.stringMatching(/^(m|manual)$/) }], svgs: 0, brs: 0 });
+  expect(await parse(page, link.newHtml)).toEqual({ text: "Read the route first.", links: [{ href: "/g", text: "route" }], svgs: 0, brs: 0 });
   expect(await parse(page, hero.newHtml)).toEqual({ text: "Go anywhere", links: [], svgs: 0, brs: 0 });
-  expect(link).toMatchObject({ oldText: "Read the guide first.", newText: "Read the manual first.", applied: false });
+  expect(link).toMatchObject({ oldText: "Read the guide first.", newText: "Read the route first.", applied: false });
 
   await page.getByRole("button", { name: "Send to agent" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Sent 2 items" })).toBeVisible();

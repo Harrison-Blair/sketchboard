@@ -2,7 +2,12 @@ import { test, expect, boardHtml, TWO_BOARDS } from "./fixtures.js";
 
 /** @param {import("./fixtures.js").Project} project */
 async function notes(project) {
-  return Object.values((await project.index()).notes ?? {});
+  try {
+    return Object.values((await project.index()).notes ?? {});
+  } catch (err) {
+    if (err instanceof SyntaxError) return []; // A write can leave JSON incomplete while the poll reads it.
+    throw err;
+  }
 }
 
 test("a sticky added in the browser is written to canvas.json and a note the agent adds appears in the browser", async ({ page, project }) => {
